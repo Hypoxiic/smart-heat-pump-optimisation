@@ -1,0 +1,13 @@
+{
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=51.5074&longitude=0.1278&hourly=temperature_2m%2Crelativehumidity_2m%2Cwindspeed_10m%2Capparent_temperature&timezone=Europe%2FLondon&start_date=2023-01-01&end_date=2023-01-07",
+    "params": {
+        "latitude": 51.5074,
+        "longitude": 0.1278,
+        "hourly": "temperature_2m,relativehumidity_2m,windspeed_10m,apparent_temperature",
+        "timezone": "Europe/London",
+        "start_date": "2023-01-01",
+        "end_date": "2023-01-07"
+    },
+    "data_snippet": {
+        "time": {
+            "0": 

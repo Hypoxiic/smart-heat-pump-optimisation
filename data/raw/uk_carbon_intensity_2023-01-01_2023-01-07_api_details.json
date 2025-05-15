@@ -1,0 +1,38 @@
+{
+    "urls_called": [
+        "https://api.carbonintensity.org.uk/intensity/date/2023-01-01",
+        "https://api.carbonintensity.org.uk/intensity/date/2023-01-02",
+        "https://api.carbonintensity.org.uk/intensity/date/2023-01-03",
+        "https://api.carbonintensity.org.uk/intensity/date/2023-01-04",
+        "https://api.carbonintensity.org.uk/intensity/date/2023-01-05",
+        "https://api.carbonintensity.org.uk/intensity/date/2023-01-06",
+        "https://api.carbonintensity.org.uk/intensity/date/2023-01-07"
+    ],
+    "date_range": {
+        "start": "2023-01-01",
+        "end": "2023-01-07"
+    },
+    "data_snippet": {
+        "carbon_intensity_forecast": {
+            "0": 73,
+            "1": 63,
+            "2": 71,
+            "3": 76,
+            "4": 72
+        },
+        "carbon_intensity_actual": {
+            "0": 72,
+            "1": 80,
+            "2": 72,
+            "3": 65,
+            "4": 65
+        },
+        "carbon_intensity_index": {
+            "0": "low",
+            "1": "low",
+            "2": "low",
+            "3": "low",
+            "4": "low"
+        },
+        "time": {
+            "0": 

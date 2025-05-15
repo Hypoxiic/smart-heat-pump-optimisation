@@ -1,0 +1,27 @@
+{
+    "source_api": "Octopus Energy",
+    "product_code": "AGILE-24-04-03",
+    "tariff_code": "E-1R-AGILE-24-04-03-C",
+    "requested_period_from": "2024-04-03T00:00:00Z",
+    "requested_period_to": "2024-05-15T23:30:00Z",
+    "urls_called": [
+        "https://api.octopus.energy/v1/products/AGILE-24-04-03/electricity-tariffs/E-1R-AGILE-24-04-03-C/standard-unit-rates/"
+    ],
+    "final_url_with_params": "https://api.octopus.energy/v1/products/AGILE-24-04-03/electricity-tariffs/E-1R-AGILE-24-04-03-C/standard-unit-rates/?page=2&page_size=1500&period_from=2024-04-03T00%3A00%3A00Z&period_to=2024-05-16T00%3A00%3A00Z",
+    "data_snippet": {
+        "time": {
+            "0": "2024-04-03 00:00:00+00:00",
+            "1": "2024-04-03 00:30:00+00:00",
+            "2": "2024-04-03 01:00:00+00:00",
+            "3": "2024-04-03 01:30:00+00:00",
+            "4": "2024-04-03 02:00:00+00:00"
+        },
+        "cost_p_per_kwh": {
+            "0": 10.248,
+            "1": 10.71,
+            "2": 11.025,
+            "3": 9.114,
+            "4": 9.618
+        }
+    }
+}

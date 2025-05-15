@@ -1,0 +1,12 @@
+
+    ================================================================================
+    IMPORTANT: Automatic fetching of electricity costs from ElectricityCosts.org.uk
+    failed. Please manually download the required data:
+    1. Go to: https://electricitycosts.org.uk/api/
+    2. Select Voltage Level (e.g., 'LV'), DNO Region (e.g., 12 for London).
+    3. Select Start Date and End Date (max 31 days per download).
+       Example: 2023-01-01 to 2023-01-07.
+    4. Click "Download" and save the CSV to: `C:\Users\mnaqi\OneDrive\Desktop\Smart Heat Pump Optimisation\data\raw`
+    5. Rename it consistently, e.g., electricity_costs_dno12_LV_2023-01-01_2023-01-07.csv
+    ================================================================================
+    

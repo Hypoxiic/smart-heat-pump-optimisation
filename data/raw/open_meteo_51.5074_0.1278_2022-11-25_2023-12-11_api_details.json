@@ -1,0 +1,48 @@
+{
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=51.5074&longitude=0.1278&hourly=temperature_2m%2Crelativehumidity_2m%2Cwindspeed_10m%2Capparent_temperature&timezone=Europe%2FLondon&start_date=2022-11-25&end_date=2023-12-11",
+    "params": {
+        "latitude": 51.5074,
+        "longitude": 0.1278,
+        "hourly": "temperature_2m,relativehumidity_2m,windspeed_10m,apparent_temperature",
+        "timezone": "Europe/London",
+        "start_date": "2022-11-25",
+        "end_date": "2023-12-11"
+    },
+    "data_snippet": {
+        "time": {
+            "0": "2022-11-25 00:00:00",
+            "1": "2022-11-25 01:00:00",
+            "2": "2022-11-25 02:00:00",
+            "3": "2022-11-25 03:00:00",
+            "4": "2022-11-25 04:00:00"
+        },
+        "temperature_2m": {
+            "0": null,
+            "1": null,
+            "2": null,
+            "3": null,
+            "4": null
+        },
+        "relativehumidity_2m": {
+            "0": null,
+            "1": null,
+            "2": null,
+            "3": null,
+            "4": null
+        },
+        "windspeed_10m": {
+            "0": null,
+            "1": null,
+            "2": null,
+            "3": null,
+            "4": null
+        },
+        "apparent_temperature": {
+            "0": null,
+            "1": null,
+            "2": null,
+            "3": null,
+            "4": null
+        }
+    }
+}
