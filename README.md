@@ -191,6 +191,8 @@ Initial focus will be on predicting `cost_p_per_kwh` to handle the existing gap 
         - `price_actual_vs_predicted_test.png`: Comparison of actual vs. predicted prices on the test set.
         - `price_feature_importance.png`: Top feature importances from the tuned model.
         - `price_training_validation_loss.png`: RMSE loss curves for training and an internal validation set during the final model fit.
+        - `loss_curve.png`: Overall training and validation loss curve from the script `scripts/plot_loss_curve.py`. (Image below)
+          ![Loss Curve](reports/figures/loss_curve.png)
         - Optuna diagnostic plots (`optuna_optimization_history.png`, `optuna_param_importances.png`) can be generated if `plotly` and `kaleido` are installed. The script attempts to save these; if `kaleido` is missing, image export will fail for these specific plots.
 - **Observations:** The tuned model's performance is subject to the hyperparameter search space and number of Optuna trials. The Optuna process helps in systematically searching for better hyperparameters. The script now also includes functionality to plot training and validation loss curves for the final model, aiding in diagnosing fit.
 
