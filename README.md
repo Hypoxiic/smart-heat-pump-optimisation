@@ -196,6 +196,30 @@ Initial focus will be on predicting `cost_p_per_kwh` to handle the existing gap 
         - Optuna diagnostic plots (`optuna_optimization_history.png`, `optuna_param_importances.png`) can be generated if `plotly` and `kaleido` are installed. The script attempts to save these; if `kaleido` is missing, image export will fail for these specific plots.
 - **Observations:** The tuned model's performance is subject to the hyperparameter search space and number of Optuna trials. The Optuna process helps in systematically searching for better hyperparameters. The script now also includes functionality to plot training and validation loss curves for the final model, aiding in diagnosing fit.
 
+### 1.2. Apparent Temperature (Demand) Prediction Model (XGBoost with Optuna Tuning)
+- **Objective:** Predict the apparent temperature one hour ahead, to serve as a proxy for heating demand.
+- **Script:** `models/train_demand_predictor.py`
+- **Approach Details:**
+    - **Data Used:** `data/processed/featured_dataset_phase3_imputed.csv`.
+    - **Target Variable:** `apparent_temperature` shifted by -1 hour (predicting T+1).
+    - **Features:** Primarily uses cyclical time features (hour, dayofweek, month, etc.) derived for the target prediction time and lagged values (1, 2, 3, 6, 12, 24 hours prior) of weather parameters (`apparent_temperature`, `temperature`, `humidity`, `windspeed`).
+    - **GPU Utilization:** The script attempts to use `device='cuda'` for XGBoost if a GPU is detected, falling back to CPU otherwise.
+    - **Hyperparameter Tuning:** `Optuna` was used to optimize XGBoost hyperparameters over 500 trials. The objective was to minimize RMSE.
+    - **Cross-Validation:** `TimeSeriesSplit` (5 splits) was used within each Optuna trial.
+    - **Early Stopping:** Applied during Optuna CV folds and for the final model fit.
+    - **Best CV RMSE (Optuna for trial 465):** ~1.1976 °C
+- **Final Model Evaluation (on hold-out Test Set after 500 trials):**
+    - **Test MAE:** ~3.6363 °C
+    - **Test RMSE:** ~4.9565 °C
+- **Output & Artifacts:**
+    - The tuned model, feature list, best hyperparameters, and Optuna study summary are saved to `models/demand_predictor_xgb_tuned.joblib`.
+    - **Plots Generated:** Saved to `reports/figures/` by the training script:
+        - `demand_actual_vs_predicted_test.png`: Comparison of actual vs. predicted apparent temperatures on the test set. (Image below)
+          ![Demand Actual vs Predicted](reports/figures/demand_actual_vs_predicted_test.png)
+        - `demand_tuned_feature_importance.png`: Top feature importances from the tuned model.
+        - Optuna diagnostic plots (`demand_optuna_optimization_history.png`, `demand_optuna_param_importances.png`) if `plotly` and `kaleido` are installed.
+- **Observations:** While Optuna found parameters achieving a good CV RMSE, the final model's performance on the test set (RMSE ~4.96°C) indicates that the predictions are often significantly off the actual apparent temperature, particularly struggling with peaks and rapid changes. This suggests that relying primarily on historical lags and basic time features is insufficient for accurate 1-hour ahead prediction of this variable. Further feature engineering, potentially incorporating direct weather forecasts, is needed.
+
 ### 2. Imputation of Missing `cost_p_per_kwh` in Gap Period
 - **Objective:** To create a complete price series for downstream analysis and more realistic baseline evaluations.
 - **Script:** `scripts/impute_gap_prices.py`
