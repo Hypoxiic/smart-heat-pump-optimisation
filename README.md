@@ -138,14 +138,76 @@ The script `scripts/preprocess_data.py` is responsible for cleaning the raw data
 - **Columns:** `time` (UTC index), `temperature`, `humidity`, `windspeed`, `apparent_temperature`, `carbon_intensity_forecast`, `carbon_intensity_actual`, `carbon_intensity_index`, `cost_p_per_kwh`.
 - The `cost_p_per_kwh` column contains `NaN` values for the period `2023-12-12` to `2024-04-02`.
 
-## Next Steps: Feature Engineering, Gap Handling, and Baselines
+## Next Steps: Model Development
 
-Based on the initial EDA and the project goals, the following steps are planned for feature engineering and establishing baseline performance:
+The primary next step involves developing predictive models and an optimisation engine. The `README` outlines:
+- Predict short-term heating demand (e.g., using XGBoost or LSTM).
+- Develop an optimisation engine (e.g., using Pyomo or simple reinforcement learning) to schedule heat pump operation.
 
-### Feature Engineering
-- **Categorical Encoding:** Convert `carbon_intensity_index` (which is categorical: low, moderate, high, very high) into a numerical format. Options include ordered integer mapping (e.g., Low=0, Moderate=1, High=2, Very High=3) or one-hot encoding.
-- **Lag Features:** Create lagged versions of key variables, particularly for `cost_p_per_kwh` and carbon intensity signals (e.g., values from the previous hour, same hour previous day, or 24 hours prior) to capture auto-correlations and daily patterns.
-- **Cyclical Time Features:** Encode time-based features such as hour of day, day of week, and month using cyclical encoding methods (e.g., sine/cosine transformations) to represent their circular nature effectively for machine learning models.
+Initial focus will be on predicting `cost_p_per_kwh` to handle the existing gap and to provide input for the future optimiser.
+
+### 1. Price Prediction Model (`cost_p_per_kwh`)
+- **Objective:** Predict the half-hourly electricity cost (`cost_p_per_kwh`).
+- **Script:** `models/train_price_predictor.py`
+- **Approach:**
+    - **Data Used:** `data/processed/featured_dataset_phase2.csv`.
+    - **Target Variable:** `cost_p_per_kwh`.
+    - **Features:** Includes cyclical time features, weather data, carbon intensity data, and crucial lag features of `cost_p_per_kwh` itself and other relevant series.
+    - **Handling Gap Period:** For training this model, rows where `cost_p_per_kwh` is NaN (i.e., the Gap Period `2023-12-12` to `2024-04-02`) are **dropped**. This ensures the model learns to predict observed prices.
+    - **Handling Feature NaNs:** Rows with NaN values in any of the selected input features (primarily due to initial lag periods) are also dropped before training.
+    - **Model:** An initial `XGBoost Regressor` is used.
+    - **Data Split:** Time-ordered 80/20 train-test split (`shuffle=False`).
+    - **Evaluation:** Initial results on the test set:
+        - Mean Absolute Error (MAE): ~1.20 p/kWh
+        - Root Mean Squared Error (RMSE): ~1.66 p/kWh
+    - **Output:** The trained model and the list of features used are saved to `models/price_predictor_xgb.joblib`.
+- **Further Work:** This model can be further refined through hyperparameter tuning, more advanced feature engineering, exploring different model architectures (e.g., LSTM as mentioned in `README`), and more sophisticated time-series cross-validation techniques.
+
+### 1.1. Advanced Price Prediction Model (XGBoost with Optuna Tuning)
+- **Objective:** Improve upon the initial price prediction model by incorporating hyperparameter tuning using Optuna, time-series cross-validation, and GPU support.
+- **Script:** `models/train_price_predictor.py` (updated)
+- **Approach Details:**
+    - **GPU Utilization:** The script attempts to use `device='cuda'` for XGBoost if a GPU is detected (updated from the deprecated `tree_method='gpu_hist'`), falling back to CPU (`hist`) otherwise.
+    - **Hyperparameter Tuning:** `Optuna` was used to optimize XGBoost hyperparameters (e.g., over 100 trials in a recent run). The objective was to minimize RMSE.
+    - **Cross-Validation:** `TimeSeriesSplit` (5 splits) was used within each Optuna trial to evaluate hyperparameter sets robustly on the training data.
+    - **Early Stopping:** Applied by setting the `early_stopping_rounds` parameter in the `XGBRegressor` constructor (e.g., `early_stopping_rounds=50` with `eval_metric='rmse'`) during CV folds in Optuna trials to speed up evaluation and prevent overfitting.
+    - **Best Hyperparameters (Example from a run):**
+        - `n_estimators`: (e.g., ~957)
+        - `learning_rate`: (e.g., ~0.072)
+        - `max_depth`: (e.g., 4)
+        - `subsample`: (e.g., ~0.60)
+        - `colsample_bytree`: (e.g., ~0.95)
+        - `gamma`: (e.g., ~0.23)
+        - `lambda` (L2 reg): (e.g., ~3.1e-06)
+        - `alpha` (L1 reg): (e.g., ~1.2e-08)
+    - **Best CV RMSE (Optuna):** ~2.3797 p/kWh (from a recent run with 100 trials).
+- **Final Model Evaluation (on hold-out Test Set):**
+    - After Optuna identified the best parameters, a final model was trained on the entire training dataset using these parameters.
+    - **Test MAE:** ~1.3103 p/kWh
+    - **Test RMSE:** ~1.7720 p/kWh
+- **Output & Artifacts:**
+    - The tuned model, feature list, best hyperparameters, and Optuna study summary are saved to `models/price_predictor_xgb_tuned.joblib`.
+    - **Plots Generated:** Saved to `reports/figures/` by the training script:
+        - `price_actual_vs_predicted_test.png`: Comparison of actual vs. predicted prices on the test set.
+        - `price_feature_importance.png`: Top feature importances from the tuned model.
+        - `price_training_validation_loss.png`: RMSE loss curves for training and an internal validation set during the final model fit.
+        - Optuna diagnostic plots (`optuna_optimization_history.png`, `optuna_param_importances.png`) can be generated if `plotly` and `kaleido` are installed. The script attempts to save these; if `kaleido` is missing, image export will fail for these specific plots.
+- **Observations:** The tuned model's performance is subject to the hyperparameter search space and number of Optuna trials. The Optuna process helps in systematically searching for better hyperparameters. The script now also includes functionality to plot training and validation loss curves for the final model, aiding in diagnosing fit.
+
+### 2. Imputation of Missing `cost_p_per_kwh` in Gap Period
+- **Objective:** To create a complete price series for downstream analysis and more realistic baseline evaluations.
+- **Script:** `scripts/impute_gap_prices.py`
+- **Approach:**
+    - The `cost_p_per_kwh` values for the Gap Period (`2023-12-12` to `2024-04-02`), which were originally NaN, were imputed using the trained XGBoost price prediction model (`models/price_predictor_xgb_tuned.joblib`).
+    - The script loads `data/processed/featured_dataset_phase2.csv`, predicts prices for the NaN values in the Gap Period, and fills them.
+    - The `is_price_imputed` column is set to `True` for these 2712 imputed rows.
+    - The resulting dataset is saved as `data/processed/featured_dataset_phase3_imputed.csv`.
+    - This new dataset has no NaN values in the `cost_p_per_kwh` column.
+- **Impact on Baseline Evaluations:**
+    - The `scripts/evaluate_baselines.py` script was updated to accept different input files and to adjust its cost calculation based on whether the data contains imputed prices.
+    - Baselines were run on both the original dataset (with a high penalty for NaN costs) and the new dataset with imputed prices.
+    - **Key Finding:** Strategies that operated during the Gap Period (e.g., "Always-On", "Fixed Schedule", temperature/carbon-driven rules) showed significantly lower (more realistic) total costs when using imputed prices compared to the high penalty for original NaNs. Cost-threshold rules also slightly changed behavior as they could now operate during the gap if imputed prices were favorable.
+    - Results are saved in `data/processed/baseline_evaluation_results_original_with_penalty.csv` and `data/processed/baseline_evaluation_results_imputed.csv`.
 
 ### Gap Period Handling (for `cost_p_per_kwh`)
 Strategies for managing the NaN values in the `cost_p_per_kwh` column during the Gap Period (`2023-12-12` to `2024-04-02`) for model training tasks:
@@ -156,15 +218,33 @@ Strategies for managing the NaN values in the `cost_p_per_kwh` column during the
 - **For the Optimiser:** The optimiser itself will need a defined strategy for these NaN periods, such as switching to a different objective (e.g., pure carbon minimization if cost is unknown) or using a pre-defined surrogate/fallback tariff.
 
 ### Baseline Benchmarks
-Before developing complex optimisation models, establish baseline performance using simple rule-based approaches. This will provide a reference point to quantify the benefits of the advanced optimiser.
-- **Example Rules:**
-    - "Run heat pump if `cost_p_per_kwh` < X (e.g., 20 p/kWh)"
-    - "Run heat pump if `carbon_intensity_actual` < Y (e.g., 120 gCO2/kWh)"
-    - Combinations of these, or time-of-day based rules.
-- **Outcome:** Compute the total operational cost and carbon emissions over the entire dataset (or representative periods) for these baseline rules. This will generate baseline cost and carbon curves against which the ML-driven optimiser can be compared.
+Before developing complex optimisation models, establish baseline performance using simple rule-based approaches. This will provide a reference point to quantify the benefits of the advanced optimiser. These baselines will be implemented and evaluated (e.g., in a Jupyter Notebook or a dedicated script) to calculate total operational cost and carbon emissions.
+
+- **Example Rules to Evaluate:**
+    - **Cost-Threshold Rule:** Run heat pump if `cost_p_per_kwh` < X (e.g., 15 p/kWh, 20 p/kWh, 25 p/kWh). Test various thresholds.
+    - **Carbon-Threshold Rule:** Run heat pump if `carbon_intensity_actual` < Y (e.g., 100 gCO2/kWh, 150 gCO2/kWh, 200 gCO2/kWh). Test various thresholds.
+    - **Fixed Schedule (Time-of-Day):** Run heat pump during pre-defined off-peak hours (e.g., 00:00-05:00 daily) or typical assumed cheaper periods.
+    - **Combined Threshold Rule:** Run heat pump if `cost_p_per_kwh` < X AND `carbon_intensity_actual` < Y.
+    - **Always-On (Naive Upper Bound):** Simulate the heat pump running constantly.
+    - **Temperature-Driven (Basic Thermostat):** Run heat pump if `apparent_temperature` < Z (e.g., 18°C), without considering cost or carbon.
+
+- **Evaluation Metrics:** For each baseline, calculate:
+    - Total electricity consumed (kWh).
+    - Total operational cost (£).
+    - Total carbon emissions (kgCO2).
+- **Outcome:** These calculations will generate baseline cost and carbon figures against which the ML-driven optimiser can be compared. The performance during the "Gap Period" (where `cost_p_per_kwh` is NaN) will need special consideration for rules involving cost (e.g., rule cannot apply, or a default high cost is assumed).
+
+**Baseline Evaluation Implementation:**
+- The baseline scenarios described above have been implemented and evaluated using the `scripts/evaluate_baselines.py` script.
+- This script loads the `featured_dataset_phase2.csv` dataset.
+- It assumes a heat pump power of `1.0 kW` when running.
+- For cost-based rules, if `cost_p_per_kwh` is NaN (i.e., during the Gap Period), the rules are generally set to *not* run the heat pump. 
+- For rules that do operate during periods of NaN cost (like "Always-On" or fixed schedules), a `DEFAULT_HIGH_COST_P_PER_KWH` (999 p/kWh) is used in the cost calculation for those hours to penalize operation during unknown price periods.
+- The script outputs a summary of total consumption (kWh), total cost (£), total carbon emissions (kgCO2), and hours run with missing data for each baseline strategy.
+- The detailed results are saved to `data/processed/baseline_evaluation_results.csv`.
 
 ## Setup and Usage
-(Instructions to be added)
+(Instructions to be added: This section will detail how to set up the project environment, install dependencies, and run the various scripts, including data fetching, preprocessing, and model training/evaluation.)
 
 ## Licensing
-(Licensing information to be added) 
+(Licensing information to be added: This section will specify the license under which the project code and data are made available.) 

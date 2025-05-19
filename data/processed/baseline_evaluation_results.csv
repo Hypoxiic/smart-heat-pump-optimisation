@@ -1,0 +1,11 @@
+,total_consumption_kwh,total_cost_gbp,total_carbon_kgco2,hours_run_with_nan_cost,hours_run_with_nan_carbon
+Always-On,16224.0,29925.43737765,2272.9625,2712.0,0.0
+Cost-Threshold (<15p/kWh),3420.0,347.2443975,300.7115,0.0,0.0
+Cost-Threshold (<20p/kWh),7712.0,1094.12016,895.613,0.0,0.0
+Cost-Threshold (<25p/kWh),9700.0,1535.5957191749999,1228.7710000000002,0.0,0.0
+Carbon-Threshold (<100gCO2/kWh),5357.0,11382.971372324999,372.053,1078.0,0.0
+Carbon-Threshold (<150gCO2/kWh),9281.0,17860.455526725,860.0205,1659.0,0.0
+Carbon-Threshold (<200gCO2/kWh),12882.0,23838.940762724997,1487.209,2188.0,0.0
+Fixed Schedule (00:00-05:00),3380.0,6084.472485074999,430.291,565.0,0.0
+Combined (<20p/kWh AND <150gCO2/kWh),5651.0,741.3553875,509.3325,0.0,0.0
+Temperature-Driven (<18.0°C on apparent_temperature),15228.0,29748.657540149998,2159.971,2712.0,0.0
