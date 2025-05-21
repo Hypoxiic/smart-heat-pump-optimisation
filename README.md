@@ -197,77 +197,73 @@ Initial focus will be on predicting `cost_p_per_kwh` to handle the existing gap 
 - **Observations:** The tuned model's performance is subject to the hyperparameter search space and number of Optuna trials. The Optuna process helps in systematically searching for better hyperparameters. The script now also includes functionality to plot training and validation loss curves for the final model, aiding in diagnosing fit.
 
 ### 1.2. Apparent Temperature (Demand) Prediction Model (XGBoost with Optuna Tuning)
-- **Objective:** Predict the apparent temperature one hour ahead, to serve as a proxy for heating demand.
-- **Script:** `models/train_demand_predictor.py`
-- **Approach Details:**
-    - **Data Used:** `data/processed/featured_dataset_phase3_imputed.csv`.
-    - **Target Variable:** `apparent_temperature` shifted by -1 hour (predicting T+1).
-    - **Features:** Primarily uses cyclical time features (hour, dayofweek, month, etc.) derived for the target prediction time and lagged values (1, 2, 3, 6, 12, 24 hours prior) of weather parameters (`apparent_temperature`, `temperature`, `humidity`, `windspeed`).
-    - **GPU Utilization:** The script attempts to use `device='cuda'` for XGBoost if a GPU is detected, falling back to CPU otherwise.
-    - **Hyperparameter Tuning:** `Optuna` was used to optimize XGBoost hyperparameters over 500 trials. The objective was to minimize RMSE.
-    - **Cross-Validation:** `TimeSeriesSplit` (5 splits) was used within each Optuna trial.
-    - **Early Stopping:** Applied during Optuna CV folds and for the final model fit.
-    - **Best CV RMSE (Optuna for trial 465):** ~1.1976 °C
-- **Final Model Evaluation (on hold-out Test Set after 500 trials):**
-    - **Test MAE:** ~3.6363 °C
-    - **Test RMSE:** ~4.9565 °C
-- **Output & Artifacts:**
-    - The tuned model, feature list, best hyperparameters, and Optuna study summary are saved to `models/demand_predictor_xgb_tuned.joblib`.
-    - **Plots Generated:** Saved to `reports/figures/` by the training script:
-        - `demand_actual_vs_predicted_test.png`: Comparison of actual vs. predicted apparent temperatures on the test set. (Image below)
-          ![Demand Actual vs Predicted](reports/figures/demand_actual_vs_predicted_test.png)
-        - `demand_tuned_feature_importance.png`: Top feature importances from the tuned model.
-        - Optuna diagnostic plots (`demand_optuna_optimization_history.png`, `demand_optuna_param_importances.png`) if `plotly` and `kaleido` are installed.
-- **Observations:** While Optuna found parameters achieving a good CV RMSE, the final model's performance on the test set (RMSE ~4.96°C) indicates that the predictions are often significantly off the actual apparent temperature, particularly struggling with peaks and rapid changes. This suggests that relying primarily on historical lags and basic time features is insufficient for accurate 1-hour ahead prediction of this variable. Further feature engineering, potentially incorporating direct weather forecasts, is needed.
+- **Objective:** Predict the apparent temperature one hour ahead (`apparent_temperature` shifted by -1 hour), to serve as a proxy for heating demand.
+- **Initial Script:** `models/train_demand_predictor.py`
+- **Initial Approach (without dedicated weather forecasts):**
+    - **Data Used:** `data/processed/featured_dataset_phase3_imputed.csv` (This dataset was an intermediate step before incorporating specific historical forecasts).
+    - **Features:** Cyclical time features (hour, dayofweek, month, etc., derived for the target prediction time) and lagged values of actual observed weather variables (`apparent_temperature`, `temperature`, `humidity`, `windspeed`).
+    - **Model:** `XGBoost Regressor` tuned with `Optuna` (500 trials) using 5-fold `TimeSeriesSplit` for cross-validation.
+    - **Performance (Initial Model - before dedicated forecasts):**
+        - Best CV RMSE (Optuna): ~1.1976 °C
+        - Test RMSE (on hold-out set): ~4.9565 °C
+    - **Observations (Initial Model):** The test performance was significantly worse than CV performance, suggesting potential overfitting to the CV splits or that the lagged actuals were not sufficient for accurate future prediction, especially during warmer months as observed from the actual vs. predicted plots. This highlighted the need for *actual* forecast data.
 
-### 2. Imputation of Missing `cost_p_per_kwh` in Gap Period
-- **Objective:** To create a complete price series for downstream analysis and more realistic baseline evaluations.
-- **Script:** `scripts/impute_gap_prices.py`
+- **Revised Approach (Incorporating Historical Weather Forecasts):**
+    - **New Data Source:** Historical point-in-time weather forecasts obtained from Open-Meteo's "Historical Forecast API" (`historical-forecast-api.open-meteo.com`).
+    - **Data Fetching Script Update:** `scripts/fetch_open_meteo.py` was modified to:
+        - Query the `historical-forecast-api` endpoint.
+        - Fetch relevant forecast variables for apparent temperature prediction, including `temperature_2m`, `relative_humidity_2m`, `wind_speed_10m`, `shortwave_radiation` (GHI), `cloud_cover`, and `precipitation` for multiple forecast horizons (e.g., 1 to 72 hours ahead).
+        - Handle pagination to cover the entire project date range (Nov 2022 - Sep 2024).
+        - Save the fetched raw forecast data to `data/raw/open_meteo_historical_forecasts_YYYYMMDD_HHMMSS.csv`.
+    - **Preprocessing Update:**
+        - The script `scripts/preprocess_data.py` was updated to:
+            - Load the new raw historical forecast data.
+            - Select the 1-hour ahead forecast for each relevant variable (e.g., `temperature_2m_forecast_h1`, `shortwave_radiation_forecast_h1`).
+            - Align these 1-hour ahead forecasts with the main dataset's hourly `time` index.
+            - Create a new final dataset: `data/processed/final_dataset_with_forecasts.csv`.
+    - **Demand Predictor Training Script Update:** `models/train_demand_predictor.py` was updated to:
+        - **Data Used:** `data/processed/final_dataset_with_forecasts.csv`.
+        - **Features:**
+            - Cyclical time features (for the target prediction time).
+            - Lagged values of *actual* observed weather variables (as before, for historical context).
+            - **Crucially, 1-hour ahead *actual forecast* variables** obtained from the Open-Meteo historical forecast API (e.g., `temperature_forecast`, `humidity_forecast`, `windspeed_forecast`, `sw_radiation_forecast`, `cloud_cover_forecast`, `precipitation_forecast`, and `apparent_temperature_forecast` if available directly or derived).
+        - **Model:** `XGBoost Regressor` with `Optuna` tuning (500 trials, 5-fold `TimeSeriesSplit`).
+        - **Current Status:** The model training script `models/train_demand_predictor.py` has been updated to load `final_dataset_with_forecasts.csv` and incorporate these new forecast features.
+    - **Performance (Model with Historical Forecasts & Feature Engineering - Run on YYYY-MM-DD):
+        - Best CV RMSE (Optuna): 1.1579 °C
+        - Test MAE (on hold-out set): 3.1747 °C
+        - Test RMSE (on hold-out set): 4.4453 °C
+    - **Output & Artifacts (for model with forecasts):**
+        - The tuned model, feature list (now including engineered features), best hyperparameters, and Optuna study summary are saved to `models/demand_predictor_xgb_tuned_with_forecasts.joblib`.
+        - **Plots Generated:** Saved to `reports/figures/`:
+            - `demand_actual_vs_predicted_test.png` (Image below reflects this latest run with feature engineering)
+              ![Demand Actual vs Predicted with FeatEng](reports/figures/demand_actual_vs_predicted_test.png)
+            - `demand_tuned_feature_importance.png` (Image below reflects feature importances with new features)
+              ![Demand Feature Importance with FeatEng](reports/figures/demand_tuned_feature_importance.png)
+            - Optuna diagnostic plots (e.g., `demand_optuna_optimization_history.png`).
+- **Next Steps for Demand Predictor:**
+    1.  **Run `models/train_demand_predictor.py`** with the new `final_dataset_with_forecasts.csv` to train and evaluate the model incorporating actual historical weather forecasts.
+    2.  Analyze the performance (CV RMSE, Test RMSE, feature importance, actual vs. predicted plots).
+    3.  **Error Analysis:**
+        - Plot residuals over time to identify systematic errors (e.g., worse performance during specific seasons, times of day).
+        - Analyze residuals against key input features (e.g., temperature, solar radiation, cloud cover) to see if the model struggles with particular weather conditions.
+        - Investigate periods with the largest errors to understand their characteristics.
+        - Compare performance on different subsets of data (e.g., weekdays vs. weekends, different seasons).
+    4.  Iterate on feature engineering if necessary (e.g., interaction terms, different lag/forecast horizons) based on error analysis insights.
+    5.  Consider alternative models if XGBoost performance with forecasts is still suboptimal.
+    6.  Once satisfied, this demand prediction will feed into the heat pump operation optimiser.
+- **Observations & Plan:** The integration of actual historical forecast data from Open-Meteo (including variables like solar radiation and cloud cover) has improved the demand predictor's performance (Test RMSE reduced from ~4.96°C to ~4.68°C). However, the actual vs. predicted plot indicates that the model still tends to under-predict peak apparent temperatures, especially during warmer periods, and smooths out the predictions compared to the more volatile actuals. The next steps will focus on further feature engineering (e.g., interaction terms, more sophisticated handling of cyclical features, potentially different forecast horizons if available/relevant) and possibly exploring alternative model architectures or more advanced time-series techniques if XGBoost performance plateaus.
+
+### 2. Heat Pump Operation Optimisation Engine
+- **Objective:** Develop an optimisation engine to schedule heat pump operation based on predicted heating demand and cost.
+- **Script:** `models/train_optimiser.py`
 - **Approach:**
-    - The `cost_p_per_kwh` values for the Gap Period (`2023-12-12` to `2024-04-02`), which were originally NaN, were imputed using the trained XGBoost price prediction model (`models/price_predictor_xgb_tuned.joblib`).
-    - The script loads `data/processed/featured_dataset_phase2.csv`, predicts prices for the NaN values in the Gap Period, and fills them.
-    - The `is_price_imputed` column is set to `True` for these 2712 imputed rows.
-    - The resulting dataset is saved as `data/processed/featured_dataset_phase3_imputed.csv`.
-    - This new dataset has no NaN values in the `cost_p_per_kwh` column.
-- **Impact on Baseline Evaluations:**
-    - The `scripts/evaluate_baselines.py` script was updated to accept different input files and to adjust its cost calculation based on whether the data contains imputed prices.
-    - Baselines were run on both the original dataset (with a high penalty for NaN costs) and the new dataset with imputed prices.
-    - **Key Finding:** Strategies that operated during the Gap Period (e.g., "Always-On", "Fixed Schedule", temperature/carbon-driven rules) showed significantly lower (more realistic) total costs when using imputed prices compared to the high penalty for original NaNs. Cost-threshold rules also slightly changed behavior as they could now operate during the gap if imputed prices were favorable.
-    - Results are saved in `data/processed/baseline_evaluation_results_original_with_penalty.csv` and `data/processed/baseline_evaluation_results_imputed.csv`.
-
-### Gap Period Handling (for `cost_p_per_kwh`)
-Strategies for managing the NaN values in the `cost_p_per_kwh` column during the Gap Period (`2023-12-12` to `2024-04-02`) for model training tasks:
-- **For Price Prediction Models:** Rows corresponding to the Gap Period might be dropped if the primary goal is to predict actual observed prices.
-- **Imputation Strategies:** Alternatively, consider imputing the missing price data. This could involve:
-    - Simpler methods (e.g., mean/median of surrounding periods, though less ideal for volatile prices).
-    - Time-series models (e.g., SARIMAX), potentially using `carbon_intensity_actual` or `carbon_intensity_forecast` as exogenous variables if a relationship is confirmed and stable. If imputation is used, an additional binary indicator column (`is_price_imputed`) should be created to flag these rows, allowing models to treat these data points differently if necessary.
-- **For the Optimiser:** The optimiser itself will need a defined strategy for these NaN periods, such as switching to a different objective (e.g., pure carbon minimization if cost is unknown) or using a pre-defined surrogate/fallback tariff.
-
-### Baseline Benchmarks
-Before developing complex optimisation models, establish baseline performance using simple rule-based approaches. This will provide a reference point to quantify the benefits of the advanced optimiser. These baselines will be implemented and evaluated (e.g., in a Jupyter Notebook or a dedicated script) to calculate total operational cost and carbon emissions.
-
-- **Example Rules to Evaluate:**
-    - **Cost-Threshold Rule:** Run heat pump if `cost_p_per_kwh` < X (e.g., 15 p/kWh, 20 p/kWh, 25 p/kWh). Test various thresholds.
-    - **Carbon-Threshold Rule:** Run heat pump if `carbon_intensity_actual` < Y (e.g., 100 gCO2/kWh, 150 gCO2/kWh, 200 gCO2/kWh). Test various thresholds.
-    - **Fixed Schedule (Time-of-Day):** Run heat pump during pre-defined off-peak hours (e.g., 00:00-05:00 daily) or typical assumed cheaper periods.
-    - **Combined Threshold Rule:** Run heat pump if `cost_p_per_kwh` < X AND `carbon_intensity_actual` < Y.
-    - **Always-On (Naive Upper Bound):** Simulate the heat pump running constantly.
-    - **Temperature-Driven (Basic Thermostat):** Run heat pump if `apparent_temperature` < Z (e.g., 18°C), without considering cost or carbon.
-
-- **Evaluation Metrics:** For each baseline, calculate:
-    - Total electricity consumed (kWh).
-    - Total operational cost (£).
-    - Total carbon emissions (kgCO2).
-- **Outcome:** These calculations will generate baseline cost and carbon figures against which the ML-driven optimiser can be compared. The performance during the "Gap Period" (where `cost_p_per_kwh` is NaN) will need special consideration for rules involving cost (e.g., rule cannot apply, or a default high cost is assumed).
-
-**Baseline Evaluation Implementation:**
-- The baseline scenarios described above have been implemented and evaluated using the `scripts/evaluate_baselines.py` script.
-- This script loads the `featured_dataset_phase2.csv` dataset.
-- It assumes a heat pump power of `1.0 kW` when running.
-- For cost-based rules, if `cost_p_per_kwh` is NaN (i.e., during the Gap Period), the rules are generally set to *not* run the heat pump. 
-- For rules that do operate during periods of NaN cost (like "Always-On" or fixed schedules), a `DEFAULT_HIGH_COST_P_PER_KWH` (999 p/kWh) is used in the cost calculation for those hours to penalize operation during unknown price periods.
-- The script outputs a summary of total consumption (kWh), total cost (£), total carbon emissions (kgCO2), and hours run with missing data for each baseline strategy.
-- The detailed results are saved to `data/processed/baseline_evaluation_results.csv`.
+    - **Data Used:** `data/processed/final_dataset_with_forecasts.csv`
+    - **Features:** `apparent_temperature`, `cost_p_per_kwh`, `carbon_intensity_forecast`, `carbon_intensity_actual`, `carbon_intensity_index`
+    - **Model:** Reinforcement learning with Q-learning
+    - **Training:** Iterative training with experience replay
+    - **Objective:** Minimize cost and carbon emissions
+- **Results:** The trained model and its performance metrics are saved to `models/optimiser_model.joblib`.
 
 ## Setup and Usage
 (Instructions to be added: This section will detail how to set up the project environment, install dependencies, and run the various scripts, including data fetching, preprocessing, and model training/evaluation.)

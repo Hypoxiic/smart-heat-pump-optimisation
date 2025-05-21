@@ -12,8 +12,8 @@ from tqdm.auto import tqdm
 # Define constants
 MODEL_OUTPUT_DIR = "models"
 FIGURES_OUTPUT_DIR = "reports/figures"
-DATA_PATH = "data/processed/featured_dataset_phase3_imputed.csv"
-MODEL_NAME_TUNED = "demand_predictor_xgb_tuned.joblib"
+DATA_PATH = "data/processed/final_dataset_with_forecasts.csv"
+MODEL_NAME_TUNED = "demand_predictor_xgb_tuned_with_forecasts.joblib"
 TARGET_COLUMN = "apparent_temperature"
 SHIFT_PERIODS = -1 # Predicting 1 hour ahead
 N_OPTUNA_TRIALS = 500
@@ -45,8 +45,17 @@ def create_lag_features(df, column_name, lags=[1, 2, 3, 6, 12, 24]):
         df_feat[f'{column_name}_lag{lag}'] = df_feat[column_name].shift(lag)
     return df_feat
 
+def create_lead_features(df, column_name, leads=[ -1 ]):
+    """Creates lead features for a specified column. Default lead is -1 (1 step ahead)."""
+    df_feat = df.copy()
+    for lead_val in leads:
+        # Lead feature names indicate the source column and how many steps ahead it is looking
+        # e.g., temperature_lead1 (for lead_val = -1)
+        df_feat[f'{column_name}_lead{abs(lead_val)}'] = df_feat[column_name].shift(lead_val)
+    return df_feat
+
 def train_demand_model():
-    """Trains an XGBoost model to predict future apparent temperature."""
+    """Trains an XGBoost model to predict future apparent temperature using actual forecast features."""
     print(f"Loading data from {DATA_PATH}...")
     try:
         df = pd.read_csv(DATA_PATH)
@@ -70,44 +79,137 @@ def train_demand_model():
 
 
     print("Creating time features for target prediction time...")
-    # Pass df['target_time'] to ensure features are for the future prediction point
     df = create_time_features(df, target_datetime_col='target_time') 
 
-    print("Creating lag features...")
+    print("Creating enhanced time features (sin/cos, categorical) for target prediction time...")
+    # Base features 'hour', 'dayofweek', 'month', 'dayofyear', 'quarter' are already created by create_time_features
+    # using df['target_time'] and added to df. We will use them here.
+    
+    # Hour sin/cos
+    df['hour_target_sin'] = np.sin(2 * np.pi * df['hour'] / 24.0)
+    df['hour_target_cos'] = np.cos(2 * np.pi * df['hour'] / 24.0)
+    # Day of week sin/cos
+    df['dayofweek_target_sin'] = np.sin(2 * np.pi * df['dayofweek'] / 7.0)
+    df['dayofweek_target_cos'] = np.cos(2 * np.pi * df['dayofweek'] / 7.0)
+    # Month sin/cos
+    df['month_target_sin'] = np.sin(2 * np.pi * (df['month'] - 1) / 12.0) # Month is 1-12
+    df['month_target_cos'] = np.cos(2 * np.pi * (df['month'] - 1) / 12.0)
+    # Day of year sin/cos
+    df['dayofyear_target_sin'] = np.sin(2 * np.pi * (df['dayofyear'] - 1) / 365.0) # Dayofyear is 1-365/366
+    df['dayofyear_target_cos'] = np.cos(2 * np.pi * (df['dayofyear'] - 1) / 365.0)
+    # is_weekend (using 'dayofweek' which is Monday=0 to Sunday=6)
+    df['is_weekend_target'] = (df['dayofweek'] >= 5).astype(int)
+    # Season (using 'month')
+    def get_season(month_col): # month_col is a Series
+        conditions = [
+            month_col.isin([12, 1, 2]), # Winter
+            month_col.isin([3, 4, 5]),   # Spring
+            month_col.isin([6, 7, 8]),   # Summer
+            month_col.isin([9, 10, 11]) # Autumn
+        ]
+        choices = [0, 1, 2, 3] # Winter, Spring, Summer, Autumn
+        return np.select(conditions, choices, default=np.nan)
+    df['season_target'] = get_season(df['month'])
+
+
+    print("Creating lag features (historical actuals)...")
     weather_cols_for_lags = ['apparent_temperature', 'temperature', 'humidity', 'windspeed']
+    if 'sw_radiation_forecast' in df.columns:
+        weather_cols_for_lags.append('sw_radiation_forecast')
+    if 'cloud_cover_forecast' in df.columns:
+        weather_cols_for_lags.append('cloud_cover_forecast')
+    if 'precipitation_forecast' in df.columns:
+         weather_cols_for_lags.append('precipitation_forecast')
+
     for col in weather_cols_for_lags:
         if col in df.columns:
-            df = create_lag_features(df, col, lags=[1, 2, 3, 6, 12, 24]) # Lags based on current time's data
+            df = create_lag_features(df, col, lags=[1, 2, 3, 6, 12, 24])
         else:
-            print(f"Warning: Column {col} not found for lag feature creation.")
+            print(f"Warning: Column {col} for lag feature creation not found.")
 
     # Explicitly define features for demand prediction
-    time_features_for_model = ['hour', 'dayofweek', 'month', 'dayofyear', 'quarter']
+    # Base time features from create_time_features are already 'hour', 'dayofweek', 'month', 'dayofyear', 'quarter'
+    time_features_for_model = ['hour', 'dayofweek', 'month', 'dayofyear', 'quarter',
+                               'hour_target_sin', 'hour_target_cos', 
+                               'dayofweek_target_sin', 'dayofweek_target_cos',
+                               'month_target_sin', 'month_target_cos',
+                               'dayofyear_target_sin', 'dayofyear_target_cos',
+                               'is_weekend_target', 'season_target']
     
     lagged_weather_features = []
-    for col in weather_cols_for_lags: # weather_cols_for_lags = ['apparent_temperature', 'temperature', 'humidity', 'windspeed']
-        for lag in [1, 2, 3, 6, 12, 24]:
-            lagged_weather_features.append(f'{col}_lag{lag}')
+    for col in weather_cols_for_lags: 
+        if col in df.columns:
+            for lag in [1, 2, 3, 6, 12, 24]:
+                lagged_weather_features.append(f'{col}_lag{lag}')
+    
+    actual_forecast_features = [
+        'temperature_forecast', 
+        'humidity_forecast', 
+        'windspeed_forecast', 
+        'sw_radiation_forecast', 
+        'cloud_cover_forecast', 
+        'precipitation_forecast',
+        'apparent_temperature_forecast'
+    ]
+    actual_forecast_features = [f for f in actual_forecast_features if f in df.columns]
+    if not actual_forecast_features:
+        print("Warning: No actual forecast features found in the loaded DataFrame. Check column names in final_dataset_with_forecasts.csv")
+    else:
+        print(f"Identified actual forecast features: {actual_forecast_features}")
+
+    print("Creating interaction features from forecast data...")
+    interaction_features = []
+    if 'temperature_forecast' in df.columns and 'humidity_forecast' in df.columns:
+        df['temp_X_humidity_forecast'] = df['temperature_forecast'] * df['humidity_forecast']
+        interaction_features.append('temp_X_humidity_forecast')
+    if 'temperature_forecast' in df.columns and 'windspeed_forecast' in df.columns:
+        df['temp_X_windspeed_forecast'] = df['temperature_forecast'] * df['windspeed_forecast']
+        interaction_features.append('temp_X_windspeed_forecast')
+    if 'sw_radiation_forecast' in df.columns and 'cloud_cover_forecast' in df.columns:
+        # Assuming cloud_cover_forecast is 0-100 (percentage), convert to 0-1 fraction
+        # Clip to ensure the fraction is within [0,1] after division if source data is noisy
+        cloud_cover_fraction = (df['cloud_cover_forecast'] / 100.0).clip(0,1)
+        df['sw_rad_eff_forecast'] = df['sw_radiation_forecast'] * (1 - cloud_cover_fraction)
+        interaction_features.append('sw_rad_eff_forecast')
+    
+    print(f"Created interaction features: {interaction_features}")
+
+    print("Creating polynomial features from forecast data...")
+    polynomial_features = []
+    if 'temperature_forecast' in df.columns:
+        df['temperature_forecast_sq'] = df['temperature_forecast']**2
+        polynomial_features.append('temperature_forecast_sq')
+    if 'humidity_forecast' in df.columns: 
+        df['humidity_forecast_sq'] = df['humidity_forecast']**2
+        polynomial_features.append('humidity_forecast_sq')
+    if 'sw_radiation_forecast' in df.columns:
+        df['sw_radiation_forecast_sq'] = df['sw_radiation_forecast']**2
+        polynomial_features.append('sw_radiation_forecast_sq')
+    
+    print(f"Created polynomial features: {polynomial_features}")
             
-    feature_columns = time_features_for_model + lagged_weather_features
+    base_feature_categories = [
+        time_features_for_model, 
+        lagged_weather_features, 
+        actual_forecast_features, 
+        interaction_features, 
+        polynomial_features
+    ]
     
-    # Ensure all selected features actually exist in the dataframe before proceeding
-    missing_model_features = [f for f in feature_columns if f not in df.columns]
-    if missing_model_features:
-        print(f"Error: The following expected model features are missing from the DataFrame: {missing_model_features}")
-        print(f"Debug: Available columns in DataFrame after feature creation: {df.columns.tolist()}")
+    feature_columns = []
+    for category in base_feature_categories:
+        for feature in category:
+            if feature not in feature_columns: # Add only if not already present
+                 feature_columns.append(feature)
+    
+    # Final check: ensure all features in feature_columns actually exist in df.columns
+    # This step is crucial if some optional features (like specific forecasts) were not present.
+    feature_columns = [f for f in feature_columns if f in df.columns]
+    
+    print(f"Total features selected for demand prediction ({len(feature_columns)}): {feature_columns}")
+    if not feature_columns:
+        print("Error: No features selected for modeling. Exiting.")
         return
-    
-    # Define features (excluding original weather columns that are not lagged, target, and temporary time columns)
-    # features_to_exclude = [TARGET_COLUMN, 'target_apparent_temperature', 'temperature', 
-    #                        'humidity', 'windspeed', 'carbon_intensity_forecast', 
-    #                        'carbon_intensity_actual', 'carbon_intensity_index', 
-    #                        'cost_p_per_kwh', 'is_price_imputed', 'target_time']
-                           
-    # All columns that are not in features_to_exclude and not the target itself
-    # feature_columns = [col for col in df.columns if col not in features_to_exclude]
-    
-    print(f"Explicitly selected features for demand prediction: {feature_columns}")
 
     print("Dropping NaN values based on the selected features and target...")
     df_model = df.dropna(subset=feature_columns + ['target_apparent_temperature'])

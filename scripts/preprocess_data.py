@@ -14,6 +14,9 @@ CARBON_RAW_FILENAME = "uk_carbon_intensity_2023-12-12_2024-04-02.csv"
 # No specific Agile tariff for this full period, so this file won't be found by preprocess script.
 ELECTRICITY_RAW_FILENAME = "electricity_costs_NO_AGILE_TARIFF_FOR_GAP_2023-12-12_2024-04-02.csv"
 
+# Historical forecast data (covers the full project range)
+HISTORICAL_FORECAST_RAW_FILENAME = "open_meteo_historical_forecasts_51.5074_0.1278_2022-11-25_2024-09-30.csv"
+
 # Add a suffix for period-specific merged files
 # This will be set dynamically in the main block based on the raw file dates for now
 MERGED_DATA_SUFFIX = ""
@@ -38,8 +41,24 @@ def preprocess_weather_data(raw_file_path: Path, processed_file_path: Path) -> p
 
         df = df.set_index('time')
         # Data is already hourly, select relevant columns with correct names
-        df = df[['temperature_2m', 'relative_humidity_2m', 'wind_speed_10m', 'apparent_temperature']]
-        df.columns = ['temperature', 'humidity', 'windspeed', 'apparent_temperature']
+        target_columns_actual_weather = ['temperature_2m', 'relative_humidity_2m', 'wind_speed_10m', 'apparent_temperature']
+        
+        # Filter for columns that actually exist in the dataframe to avoid KeyErrors
+        available_columns = [col for col in target_columns_actual_weather if col in df.columns]
+        missing_columns = [col for col in target_columns_actual_weather if col not in df.columns]
+        if missing_columns:
+            print(f"Warning: The following expected weather columns were not found in {raw_file_path.name}: {missing_columns}")
+
+        df = df[available_columns]
+        
+        # Rename available columns to standard names
+        rename_map = {
+            'temperature_2m': 'temperature',
+            'relative_humidity_2m': 'humidity',
+            'wind_speed_10m': 'windspeed',
+            'apparent_temperature': 'apparent_temperature'
+        }
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in available_columns})
         
         PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
         df.to_csv(processed_file_path)
@@ -133,6 +152,48 @@ def preprocess_electricity_costs_data(raw_file_path: Path, processed_file_path: 
         print(f"Error processing electricity cost data: {e}")
     return None
 
+def preprocess_historical_forecast_data(raw_file_path: Path, processed_file_path: Path) -> pd.DataFrame | None:
+    """Loads, preprocesses, and saves historical FORECAST weather data."""
+    try:
+        df = pd.read_csv(raw_file_path)
+        df['time'] = pd.to_datetime(df['time'])
+
+        if df['time'].dt.tz is None:
+            df['time'] = df['time'].dt.tz_localize('UTC')
+        elif df['time'].dt.tz != datetime.timezone.utc:
+            df['time'] = df['time'].dt.tz_convert('UTC')
+            
+        if df['time'].isnull().any():
+            print("Warning: NaT values introduced in historical forecast data time column during timezone localization.")
+
+        df = df.set_index('time')
+        
+        # Select relevant forecast columns and rename them
+        # Original names from fetch script: "temperature_2m,relative_humidity_2m,wind_speed_10m,shortwave_radiation,cloud_cover,precipitation,apparent_temperature"
+        forecast_columns = {
+            'temperature_2m': 'temperature_forecast',
+            'relative_humidity_2m': 'humidity_forecast',
+            'wind_speed_10m': 'windspeed_forecast',
+            'shortwave_radiation': 'sw_radiation_forecast',
+            'cloud_cover': 'cloud_cover_forecast',
+            'precipitation': 'precipitation_forecast',
+            'apparent_temperature': 'apparent_temperature_forecast' # Keep this for reference/use
+        }
+        # Filter for columns that actually exist in the dataframe to avoid KeyErrors
+        cols_to_select = {k: v for k, v in forecast_columns.items() if k in df.columns}
+        df = df[list(cols_to_select.keys())]
+        df = df.rename(columns=cols_to_select)
+        
+        PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        df.to_csv(processed_file_path)
+        print(f"Processed historical forecast data saved to {processed_file_path}")
+        return df
+    except FileNotFoundError:
+        print(f"Error: Raw historical forecast data file not found at {raw_file_path}")
+    except Exception as e:
+        print(f"Error processing historical forecast data: {e}")
+    return None
+
 def merge_and_save_data(weather_df, carbon_df, electricity_df, merged_file_path: Path):
     """Merges the processed dataframes and saves the result."""
     dfs_to_merge = []
@@ -169,8 +230,11 @@ def merge_and_save_data(weather_df, carbon_df, electricity_df, merged_file_path:
     print("\\n--- Merged Data Info ---")
     final_df.info()
 
-def concatenate_period_data(processed_dir: Path, output_filename: str):
-    """Concatenates merged data from different periods into a single dataset."""
+def concatenate_period_data(processed_dir: Path, output_filename: str) -> pd.DataFrame | None:
+    """
+    Concatenates merged data from different periods into a single dataset.
+    Returns the concatenated dataframe.
+    """
     period1_file = processed_dir / "merged_project_data_2022-11-25_2023-12-11.csv"
     gap_period_file = processed_dir / "merged_project_data_2023-12-12_2024-04-02.csv"
     period2_file = processed_dir / "merged_project_data_2024-04-03_2024-09-30.csv"
@@ -242,56 +306,146 @@ def concatenate_period_data(processed_dir: Path, output_filename: str):
     print(final_df_recombined.tail())
     print("\n--- Final Concatenated Data Info ---")
     final_df_recombined.info()
+    return final_df_recombined
 
 if __name__ == "__main__":
     print("Starting data preprocessing...")
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     # Determine period from one of the raw filenames (e.g., weather)
-    # This is a bit heuristic; ideally, pass dates explicitly or use a config
-    # For this iteration, we assume filenames are updated before running.
-    period_str = "_" + WEATHER_RAW_FILENAME.split('_')[-2] + "_" + WEATHER_RAW_FILENAME.split('_')[-1].replace(".csv","")
-    
-    # Define file paths
-    current_weather_raw_filename = f"open_meteo_51.5074_0.1278{period_str}.csv"
-    current_carbon_raw_filename = f"uk_carbon_intensity{period_str}.csv"
-    # For electricity, the product code is also in the name
-    # We need to extract product code and dates separately or rely on exact match.
-    # Let's assume the global constants are updated before each run for now.
-    # This part will need to be more robust if we fully automate multi-period processing.
+    # This defines the three main periods for processing historical ACTUALS
+    RAW_DATA_FILES_PERIODS = [
+        {
+            "weather": "open_meteo_51.5074_0.1278_2022-11-25_2023-12-11.csv",
+            "carbon": "uk_carbon_intensity_2022-11-25_2023-12-11.csv",
+            "electricity": "electricity_costs_octopus_AGILE-FLEX-22-11-25_C_2022-11-25_2023-12-11.csv",
+            "suffix": "_2022-11-25_2023-12-11"
+        },
+        {
+            "weather": WEATHER_RAW_FILENAME, # Uses constant for Gap period
+            "carbon": CARBON_RAW_FILENAME,   # Uses constant for Gap period
+            "electricity": None, # No electricity file for the full Gap period
+            "suffix": "_2023-12-12_2024-04-02"
+        },
+        {
+            "weather": "open_meteo_51.5074_0.1278_2024-04-03_2024-09-30.csv",
+            "carbon": "uk_carbon_intensity_2024-04-03_2024-09-30.csv",
+            "electricity": "electricity_costs_octopus_AGILE-24-04-03_C_2024-04-03_2024-09-30.csv",
+            "suffix": "_2024-04-03_2024-09-30"
+        }
+    ]
 
-    weather_raw_path = RAW_DATA_DIR / WEATHER_RAW_FILENAME
-    weather_processed_path = PROCESSED_DATA_DIR / f"weather_hourly{period_str}.csv"
-    
-    carbon_raw_path = RAW_DATA_DIR / CARBON_RAW_FILENAME
-    carbon_processed_path = PROCESSED_DATA_DIR / f"carbon_intensity_hourly{period_str}.csv"
-    
-    electricity_raw_path = RAW_DATA_DIR / ELECTRICITY_RAW_FILENAME
-    electricity_processed_path = PROCESSED_DATA_DIR / f"electricity_costs_hourly{period_str}.csv"
-    
-    merged_data_path = PROCESSED_DATA_DIR / f"merged_project_data{period_str}.csv"
+    for period_files in RAW_DATA_FILES_PERIODS:
+        print(f"\\n--- Processing Period: {period_files['suffix'].strip('_')} ---")
+        
+        # Preprocess Weather Data (Actuals)
+        weather_df = None
+        if period_files["weather"]:
+            raw_weather_path = RAW_DATA_DIR / period_files["weather"]
+            processed_weather_path = PROCESSED_DATA_DIR / f"weather_hourly{period_files['suffix']}.csv"
+            weather_df = preprocess_weather_data(raw_weather_path, processed_weather_path)
 
-    # Process each dataset
-    df_weather = preprocess_weather_data(weather_raw_path, weather_processed_path)
-    df_carbon = preprocess_carbon_intensity_data(carbon_raw_path, carbon_processed_path)
-    df_electricity = preprocess_electricity_costs_data(electricity_raw_path, electricity_processed_path)
+        # Preprocess Carbon Intensity Data
+        carbon_df = None
+        if period_files["carbon"]:
+            raw_carbon_path = RAW_DATA_DIR / period_files["carbon"]
+            processed_carbon_path = PROCESSED_DATA_DIR / f"carbon_intensity_hourly{period_files['suffix']}.csv"
+            carbon_df = preprocess_carbon_intensity_data(raw_carbon_path, processed_carbon_path)
 
-    # Merge and save if at least weather and carbon are available
-    if df_weather is not None and df_carbon is not None:
-        print("\\nMerging datasets for the current period...")
-        merge_and_save_data(df_weather, df_carbon, df_electricity, merged_data_path) # df_electricity can be None
+        # Preprocess Electricity Costs Data
+        electricity_df = None
+        if period_files["electricity"]: # Check if electricity file key is present and not None
+            raw_electricity_path = RAW_DATA_DIR / period_files["electricity"]
+            processed_electricity_path = PROCESSED_DATA_DIR / f"electricity_costs_hourly{period_files['suffix']}.csv"
+            electricity_df = preprocess_electricity_costs_data(raw_electricity_path, processed_electricity_path)
+        else:
+            print(f"No electricity cost file specified for period {period_files['suffix']}. Skipping electricity preprocessing.")
+
+        # Merge and Save Data for the current period
+        if weather_df is not None or carbon_df is not None or electricity_df is not None:
+            merged_data_path = PROCESSED_DATA_DIR / f"merged_project_data{period_files['suffix']}.csv"
+            merge_and_save_data(weather_df, carbon_df, electricity_df, merged_data_path)
+        else:
+            print(f"Skipping merge for period {period_files['suffix']} as no data was processed.")
+
+    # Concatenate all period data
+    final_concatenated_df = concatenate_period_data(PROCESSED_DATA_DIR, "final_dataset_all_periods.csv")
+
+    # --- Integrate Historical Forecast Data ---
+    if final_concatenated_df is not None:
+        print("\\n--- Processing and Integrating Historical Forecast Data ---")
+
+        print("\\nDEBUG: Info for final_concatenated_df (from concatenate_period_data) BEFORE MERGE:")
+        final_concatenated_df.info()
+        print(f"DEBUG: Columns in final_concatenated_df: {final_concatenated_df.columns.tolist()}")
+        print(f"DEBUG: Index name of final_concatenated_df: {final_concatenated_df.index.name}")
+
+        raw_historical_forecast_path = RAW_DATA_DIR / HISTORICAL_FORECAST_RAW_FILENAME
+        processed_historical_forecast_path = PROCESSED_DATA_DIR / f"historical_forecasts_processed{RAW_DATA_FILES_PERIODS[0]['suffix']}_{RAW_DATA_FILES_PERIODS[-1]['suffix']}.csv" # A bit clunky filename gen, but ok for now
+        
+        historical_forecast_df = preprocess_historical_forecast_data(raw_historical_forecast_path, processed_historical_forecast_path)
+
+        if historical_forecast_df is not None:
+            print("Merging concatenated data with historical forecast data...")
+
+            print("\\nDEBUG: Info for historical_forecast_df BEFORE MERGE:")
+            historical_forecast_df.info()
+            print(f"DEBUG: Columns in historical_forecast_df: {historical_forecast_df.columns.tolist()}")
+            print(f"DEBUG: Index name of historical_forecast_df: {historical_forecast_df.index.name}")
+            
+            # Ensure both DataFrames have UTC timezone-aware DatetimeIndex
+            if final_concatenated_df.index.tz is None:
+                final_concatenated_df = final_concatenated_df.tz_localize('UTC')
+            elif final_concatenated_df.index.tz != datetime.timezone.utc:
+                final_concatenated_df = final_concatenated_df.tz_convert('UTC')
+
+            if historical_forecast_df.index.tz is None:
+                historical_forecast_df = historical_forecast_df.tz_localize('UTC')
+            elif historical_forecast_df.index.tz != datetime.timezone.utc:
+                historical_forecast_df = historical_forecast_df.tz_convert('UTC')
+
+            # Using left merge to keep all rows from final_concatenated_df and add forecast data where available
+            final_df_with_forecasts = pd.merge(final_concatenated_df, historical_forecast_df, on='time', how='left')
+            
+            print("\\nDEBUG: Info for final_df_with_forecasts AFTER MERGE (before ffill/bfill):")
+            final_df_with_forecasts.info()
+            print(f"DEBUG: Columns in final_df_with_forecasts after merge: {final_df_with_forecasts.columns.tolist()}")
+
+            final_df_with_forecasts = final_df_with_forecasts.sort_index()
+            
+            # Forward-fill and backward-fill the newly added forecast columns ONLY.
+            # Do not re-fill 'cost_p_per_kwh' if it has intentional NaNs from the gap period.
+            
+            # Identify the actual names of the forecast columns as they appear in historical_forecast_df
+            # These are the columns we want to ffill/bfill after they've been merged.
+            forecast_column_names_to_fill = [col for col in historical_forecast_df.columns if col in final_df_with_forecasts.columns]
+
+            if forecast_column_names_to_fill:
+                # Create a temporary DataFrame containing ONLY these forecast columns from the merged data
+                temp_forecast_part = final_df_with_forecasts[forecast_column_names_to_fill].copy()
+                
+                # Fill NaNs ONLY in this temporary DataFrame of forecast columns
+                temp_forecast_part = temp_forecast_part.ffill().bfill()
+                
+                # Update the main merged DataFrame (final_df_with_forecasts) with these filled forecast columns
+                # This replaces the original forecast columns (which might have NaNs from the merge)
+                # with their filled versions, leaving all other columns (like cost_p_per_kwh) untouched.
+                for col in forecast_column_names_to_fill:
+                    final_df_with_forecasts[col] = temp_forecast_part[col]
+            
+            output_path_with_forecasts = PROCESSED_DATA_DIR / "final_dataset_with_forecasts.csv"
+            final_df_with_forecasts.to_csv(output_path_with_forecasts)
+            
+            print(f"\\nFinal dataset with historical forecasts saved to {output_path_with_forecasts}")
+            print("\\n--- Final Data with Forecasts Sample (Head) ---")
+            print(final_df_with_forecasts.head())
+            print("\\n--- Final Data with Forecasts Sample (Tail) ---")
+            print(final_df_with_forecasts.tail())
+            print("\\n--- Final Data with Forecasts Info ---")
+            final_df_with_forecasts.info()
+        else:
+            print("Historical forecast data could not be processed. Skipping merge.")
     else:
-        print("\\nSkipping merge for current period due to missing processed data for weather or carbon intensity.")
-        print(f"Weather data processed: {df_weather is not None}")
-        print(f"Carbon intensity data processed: {df_carbon is not None}")
-        print(f"Electricity costs data processed: {df_electricity is not None}")
+        print("Final concatenated data is not available. Skipping forecast integration.")
 
-    print("\\nData preprocessing for current period finished.") 
-    
-    # --- Concatenate all period data --- 
-    # This section assumes that the individual period processing for ALL periods has been done in previous runs
-    # or that this script is run sequentially for each period and then this final step is desired.
-    # For a fully automated multi-period pipeline, the main logic would need to loop through period definitions.
-    print("\\nStarting concatenation of all period datasets...")
-    concatenate_period_data(PROCESSED_DATA_DIR, "final_dataset_all_periods.csv")
-    print("\\nConcatenation finished.") 
+    print("\\nPreprocessing script finished.") 
