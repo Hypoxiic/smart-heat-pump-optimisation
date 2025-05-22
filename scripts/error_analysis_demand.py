@@ -1,7 +1,7 @@
 """
-Error analysis for the tuned 1-hour-ahead apparent-temperature model.
+Error analysis for the tuned 1-hour-ahead apparent-temperature model V2 (with monotonic constraints).
 
-▪ Re-creates the train/test split exactly as in `train_demand_predictor.py`
+▪ Re-creates the train/test split exactly as in `train_demand_predictor_v2.py`
 ▪ Generates fresh test-set predictions
 ▪ Computes residuals + key metrics
 ▪ Builds a suite of one-figure-per-file matplotlib plots
@@ -22,7 +22,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 # ---------------------  repo-specific paths --------------------------
 DATA_PATH = "data/processed/final_dataset_with_forecasts.csv"
-MODEL_PATH = "models/demand_predictor_xgb_tuned_with_forecasts.joblib"
+MODEL_PATH = "models/demand_predictor_xgb_tuned_v2_monotonic.joblib"
 
 FIG_DIR = "reports/figures"
 os.makedirs(FIG_DIR, exist_ok=True)
@@ -150,7 +150,7 @@ y_pred = model.predict(X_test)
 mae  = mean_absolute_error(y_test, y_pred)
 rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 
-print(f"\nTest-set metrics  (N = {len(y_test)})")
+print(f"\nTest-set metrics V2 (Monotonic) (N = {len(y_test)})")
 print(f"  MAE : {mae:7.3f} °C")
 print(f"  RMSE: {rmse:7.3f} °C")
 
@@ -176,8 +176,8 @@ plt.plot(residuals.index, residuals, lw=0.8)
 plt.axhline(0, ls="--")
 plt.xlabel("Time")
 plt.ylabel("Residual (°C)")
-plt.title("Residuals vs. Time")
-savefig("demand_residuals_over_time.png")
+plt.title("Residuals vs. Time (V2 Monotonic)")
+savefig("demand_residuals_over_time_v2_monotonic.png")
 
 # ---------------------------------------------------------------------
 # 7. Histogram of residuals
@@ -186,8 +186,8 @@ plt.figure(figsize=(6, 4))
 plt.hist(residuals, bins=60)
 plt.xlabel("Residual (°C)")
 plt.ylabel("Frequency")
-plt.title("Residual Distribution (test set)")
-savefig("demand_residual_histogram.png")
+plt.title("Residual Distribution (V2 Monotonic, test set)")
+savefig("demand_residual_histogram_v2_monotonic.png")
 
 # ---------------------------------------------------------------------
 # 8. Actual vs. predicted scatter
@@ -198,8 +198,8 @@ lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
 plt.plot(lims, lims, ls="--")
 plt.xlabel("Actual °C")
 plt.ylabel("Predicted °C")
-plt.title("Actual vs. Predicted")
-savefig("demand_actual_vs_pred_scatter.png")
+plt.title("Actual vs. Predicted (V2 Monotonic)")
+savefig("demand_actual_vs_pred_scatter_v2_monotonic.png")
 
 # ---------------------------------------------------------------------
 # 9. MAE by hour-of-day / month / season / weekday
@@ -224,8 +224,8 @@ for label, grp in groups.items():
     plt.figure(figsize=(7,4))
     mae_grp.plot.bar()
     plt.ylabel("MAE (°C)")
-    plt.title(f"MAE by {label.replace('_',' ').title()}")
-    savefig(f"demand_MAE_by_{label}.png")
+    plt.title(f"MAE by {label.replace('_',' ').title()} (V2 Monotonic)")
+    savefig(f"demand_MAE_by_{label}_v2_monotonic.png")
 
 # ---------------------------------------------------------------------
 # 10. Save numeric error summaries
@@ -237,8 +237,8 @@ summary = pd.DataFrame({
     "MAE_by_season" : residuals.abs().groupby(season).mean()
 })
 
-summary_path = os.path.join(FIG_DIR, "demand_error_summary.csv")
+summary_path = os.path.join(FIG_DIR, "demand_error_summary_v2_monotonic.csv")
 summary.to_csv(summary_path)
-print(f"\nNumeric summaries → {summary_path}")
+print(f"\nNumeric summaries V2 (Monotonic) → {summary_path}")
 
-print("\nDone – check the figures & CSV in reports/figures/")
+print("\nDone – check the V2 monotonic figures & CSV in reports/figures/") 

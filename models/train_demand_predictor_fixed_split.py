@@ -13,10 +13,10 @@ from tqdm.auto import tqdm
 MODEL_OUTPUT_DIR = "models"
 FIGURES_OUTPUT_DIR = "reports/figures"
 DATA_PATH = "data/processed/final_dataset_with_forecasts.csv"
-MODEL_NAME_TUNED = "demand_predictor_xgb_tuned_v2_monotonic.joblib"
+MODEL_NAME_TUNED = "demand_predictor_xgb_tuned_stratified.joblib"
 TARGET_COLUMN = "apparent_temperature"
 SHIFT_PERIODS = -1 # Predicting 1 hour ahead
-N_OPTUNA_TRIALS = 200  # Reduced for faster testing
+N_OPTUNA_TRIALS = 100  # Reduced for testing
 N_CV_SPLITS = 5
 OPTUNA_EARLY_STOPPING_ROUNDS = 20
 XGB_EARLY_STOPPING_ROUNDS_FINAL = 50
@@ -43,22 +43,45 @@ def create_lag_features(df, column_name, lags=[1, 2, 3, 6, 12, 24]):
         df_feat[f'{column_name}_lag{lag}'] = df_feat[column_name].shift(lag)
     return df_feat
 
-def train_demand_model():
-    """Trains an XGBoost model with monotonic constraints to predict future apparent temperature."""
-    print(f"Loading data from {DATA_PATH}...")
-    try:
-        df = pd.read_csv(DATA_PATH)
-    except FileNotFoundError:
-        print(f"Error: Data file not found at {DATA_PATH}")
-        return
+def create_stratified_split(df, test_size=0.2, random_state=42):
+    """Create a stratified split that ensures similar temperature distributions in train/test."""
+    
+    # Create temperature bins for stratification
+    df['temp_bin'] = pd.cut(df['target_apparent_temperature'], 
+                           bins=[-10, 0, 5, 10, 15, 20, 25, 40], 
+                           labels=['very_cold', 'cold', 'cool', 'mild', 'warm', 'hot', 'very_hot'])
+    
+    # Create month bins for seasonal balance
+    df['season'] = df['month'] % 12 // 3  # 0=Winter, 1=Spring, 2=Summer, 3=Autumn
+    
+    # Combine temp and season for stratification
+    df['strata'] = df['temp_bin'].astype(str) + '_' + df['season'].astype(str)
+    
+    # Ensure we have enough samples in each stratum
+    strata_counts = df['strata'].value_counts()
+    valid_strata = strata_counts[strata_counts >= 10].index  # At least 10 samples per stratum
+    df_valid = df[df['strata'].isin(valid_strata)]
+    
+    print(f"Using {len(valid_strata)} strata out of {len(strata_counts)} total")
+    print(f"Valid samples: {len(df_valid)} out of {len(df)}")
+    
+    # Stratified split
+    from sklearn.model_selection import train_test_split
+    
+    train_indices, test_indices = train_test_split(
+        df_valid.index, 
+        test_size=test_size, 
+        stratify=df_valid['strata'],
+        random_state=random_state
+    )
+    
+    return train_indices, test_indices
 
-    if 'time' not in df.columns:
-        print("Error: 'time' column not found in the dataset.")
-        return
-        
-    df['time'] = pd.to_datetime(df['time'])
-    df = df.set_index('time')
-    df = df.sort_index()
+def train_demand_model():
+    """Trains an XGBoost model with proper stratified split to handle temperature distribution."""
+    print(f"Loading data from {DATA_PATH}...")
+    df = pd.read_csv(DATA_PATH, parse_dates=['time'])
+    df = df.set_index('time').sort_index()
 
     print("Creating target variable...")
     df['target_apparent_temperature'] = df[TARGET_COLUMN].shift(SHIFT_PERIODS)
@@ -67,7 +90,7 @@ def train_demand_model():
     print("Creating time features for target prediction time...")
     df = create_time_features(df, target_datetime_col='target_time') 
 
-    print("Creating enhanced time features (sin/cos, categorical) for target prediction time...")
+    print("Creating enhanced time features...")
     # Hour sin/cos
     df['hour_target_sin'] = np.sin(2 * np.pi * df['hour'] / 24.0)
     df['hour_target_cos'] = np.cos(2 * np.pi * df['hour'] / 24.0)
@@ -94,7 +117,7 @@ def train_demand_model():
         return np.select(conditions, choices, default=np.nan)
     df['season_target'] = get_season(df['month'])
 
-    print("Creating lag features (historical actuals)...")
+    print("Creating lag features...")
     weather_cols_for_lags = ['apparent_temperature', 'temperature', 'humidity', 'windspeed']
     if 'sw_radiation_forecast' in df.columns:
         weather_cols_for_lags.append('sw_radiation_forecast')
@@ -107,7 +130,7 @@ def train_demand_model():
         if col in df.columns:
             df = create_lag_features(df, col, lags=[1, 2, 3, 6, 12, 24])
 
-    # Define features for demand prediction
+    # Define features
     time_features_for_model = ['hour', 'dayofweek', 'month', 'dayofyear', 'quarter',
                                'hour_target_sin', 'hour_target_cos', 
                                'dayofweek_target_sin', 'dayofweek_target_cos',
@@ -132,7 +155,7 @@ def train_demand_model():
     ]
     actual_forecast_features = [f for f in actual_forecast_features if f in df.columns]
 
-    print("Creating interaction features from forecast data...")
+    print("Creating interaction features...")
     interaction_features = []
     if 'temperature_forecast' in df.columns and 'humidity_forecast' in df.columns:
         df['temp_X_humidity_forecast'] = df['temperature_forecast'] * df['humidity_forecast']
@@ -145,7 +168,7 @@ def train_demand_model():
         df['sw_rad_eff_forecast'] = df['sw_radiation_forecast'] * (1 - cloud_cover_fraction)
         interaction_features.append('sw_rad_eff_forecast')
 
-    print("Creating polynomial features from forecast data...")
+    print("Creating polynomial features...")
     polynomial_features = []
     if 'temperature_forecast' in df.columns:
         df['temperature_forecast_sq'] = df['temperature_forecast']**2
@@ -171,57 +194,51 @@ def train_demand_model():
             if feature not in feature_columns:
                  feature_columns.append(feature)
     
-    # Final check: ensure all features actually exist in df.columns
     feature_columns = [f for f in feature_columns if f in df.columns]
     
-    print(f"Total features selected for demand prediction ({len(feature_columns)}): {feature_columns}")
+    print(f"Total features selected: {len(feature_columns)}")
     
-    print("Dropping NaN values based on the selected features and target...")
+    print("Dropping NaN values...")
     df_model = df.dropna(subset=feature_columns + ['target_apparent_temperature'])
+    
+    print(f"Dataset shape for modeling: {df_model.shape}")
+    
+    # **CRITICAL FIX: Use stratified split instead of chronological**
+    print("Creating stratified train/test split...")
+    train_indices, test_indices = create_stratified_split(df_model, test_size=0.2, random_state=42)
     
     X = df_model[feature_columns]
     y = df_model['target_apparent_temperature']
+    
+    X_train, X_test = X.loc[train_indices], X.loc[test_indices]
+    y_train, y_test = y.loc[train_indices], y.loc[test_indices]
+    
+    print(f"Train set: {len(y_train)} samples")
+    print(f"  Temperature range: {y_train.min():.1f}°C to {y_train.max():.1f}°C")
+    print(f"  >20°C: {(y_train > 20).sum()} ({(y_train > 20).mean()*100:.1f}%)")
+    
+    print(f"Test set: {len(y_test)} samples")
+    print(f"  Temperature range: {y_test.min():.1f}°C to {y_test.max():.1f}°C")
+    print(f"  >20°C: {(y_test > 20).sum()} ({(y_test > 20).mean()*100:.1f}%)")
 
-    print(f"Dataset shape for modeling: X-{X.shape}, y-{y.shape}")
-
-    print("Splitting data into train and test sets (80/20, time-ordered)...")
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-
-    print("Calculating sample weights for training (4x weight for temperatures > 18°C)...")
-    k = 3
-    sample_weight_train = np.ones(len(y_train))
-    sample_weight_train[y_train > 18] = 1 + k
-
-    # --- Optuna Hyperparameter Tuning ---
-    print(f"Starting Optuna hyperparameter tuning with {N_CV_SPLITS}-fold TimeSeriesSplit and {N_OPTUNA_TRIALS} trials...")
+    # No sample weights needed with proper split
+    print("Training XGBoost with stratified data...")
 
     def objective(trial):
         params = {
             'objective': 'reg:squarederror',
             'eval_metric': 'rmse',
-            'n_estimators': trial.suggest_int('n_estimators', 200, 2000, step=100),
-            'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.1, log=True),
-            'max_depth': trial.suggest_int('max_depth', 4, 12),  # Increased range for deeper trees
-            'subsample': trial.suggest_float('subsample', 0.5, 1.0),
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+            'n_estimators': trial.suggest_int('n_estimators', 200, 1000, step=100),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
+            'max_depth': trial.suggest_int('max_depth', 3, 8),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
             'gamma': trial.suggest_float('gamma', 1e-8, 1.0, log=True),
             'lambda': trial.suggest_float('lambda', 1e-8, 1.0, log=True),
             'alpha': trial.suggest_float('alpha', 1e-8, 1.0, log=True),
             'random_state': 42,
             'early_stopping_rounds': OPTUNA_EARLY_STOPPING_ROUNDS
         }
-        
-        # Add monotonic constraints to prevent flattening at high temperatures
-        monotone_constraints_dict = {}
-        if 'temperature_forecast' in feature_columns:
-            monotone_constraints_dict['temperature_forecast'] = 1
-        if 'apparent_temperature_forecast' in feature_columns:
-            monotone_constraints_dict['apparent_temperature_forecast'] = 1
-        if 'sw_radiation_forecast' in feature_columns:
-            monotone_constraints_dict['sw_radiation_forecast'] = 1
-        
-        if monotone_constraints_dict:
-            params['monotone_constraints'] = monotone_constraints_dict
         
         # GPU detection
         try:
@@ -237,12 +254,9 @@ def train_demand_model():
         for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train)):
             X_train_fold, X_val_fold = X_train.iloc[train_idx], X_train.iloc[val_idx]
             y_train_fold, y_val_fold = y_train.iloc[train_idx], y_train.iloc[val_idx]
-            
-            current_sample_weight_train_fold = sample_weight_train[train_idx]
 
             model.fit(X_train_fold, y_train_fold,
                       eval_set=[(X_val_fold, y_val_fold)],
-                      sample_weight=current_sample_weight_train_fold,
                       verbose=False)
 
             preds = model.predict(X_val_fold)
@@ -258,11 +272,7 @@ def train_demand_model():
         study.optimize(objective, n_trials=1, timeout=1800)
 
     print("Optuna study finished.")
-    print(f"Best trial number: {study.best_trial.number}")
     print(f"Best RMSE (CV): {study.best_value:.4f}")
-    print("Best hyperparameters:")
-    for key, value in study.best_params.items():
-        print(f"  {key}: {value}")
     
     best_params = study.best_params
     
@@ -270,27 +280,11 @@ def train_demand_model():
     try:
         xgb.XGBRegressor(device='cuda').fit(X_train.iloc[:2], y_train.iloc[:2])
         best_params['device'] = 'cuda'
-        print("Final model training will attempt to use GPU.")
     except Exception:
-        print("Final model training will use CPU.")
         if 'device' in best_params: 
             del best_params['device']
 
-    print("Training final XGBoost Regressor model with best hyperparameters...")
-    
-    # Add monotonic constraints to final model
-    final_monotone_constraints_dict = {}
-    if 'temperature_forecast' in feature_columns:
-        final_monotone_constraints_dict['temperature_forecast'] = 1
-    if 'apparent_temperature_forecast' in feature_columns:
-        final_monotone_constraints_dict['apparent_temperature_forecast'] = 1
-    if 'sw_radiation_forecast' in feature_columns:
-        final_monotone_constraints_dict['sw_radiation_forecast'] = 1
-    
-    if final_monotone_constraints_dict:
-        best_params['monotone_constraints'] = final_monotone_constraints_dict
-        print(f"Applied monotonic constraints to final model: {final_monotone_constraints_dict}")
-    
+    print("Training final model...")
     final_model = xgb.XGBRegressor(
         objective='reg:squarederror',
         eval_metric='rmse',
@@ -300,73 +294,52 @@ def train_demand_model():
     )
     
     # Create evaluation set for early stopping
-    X_train_final_part, X_eval_final_part, y_train_final_part, y_eval_final_part = train_test_split(
-        X_train, y_train, test_size=0.15, shuffle=False
+    X_train_part, X_eval_part, y_train_part, y_eval_part = train_test_split(
+        X_train, y_train, test_size=0.15, shuffle=True, random_state=42
     )
-    
-    # Sample weights for final training
-    sample_weight_train_final_part = sample_weight_train[:len(X_train_final_part)]
 
-    final_model.fit(X_train_final_part, y_train_final_part,
-                    eval_set=[(X_eval_final_part, y_eval_final_part)],
-                    sample_weight=sample_weight_train_final_part,
+    final_model.fit(X_train_part, y_train_part,
+                    eval_set=[(X_eval_part, y_eval_part)],
                     verbose=50)
 
-    print("Making predictions on the test set with the tuned model...")
+    print("Making predictions...")
     y_pred = final_model.predict(X_test)
 
-    print("Evaluating model...")
     mae = mean_absolute_error(y_test, y_pred)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-    print(f"Test MAE: {mae:.4f}")
-    print(f"Test RMSE: {rmse:.4f}")
+    print(f"STRATIFIED SPLIT RESULTS:")
+    print(f"Test MAE: {mae:.4f}°C")
+    print(f"Test RMSE: {rmse:.4f}°C")
 
-    # Create output directories
+    # Save model
     os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
     os.makedirs(FIGURES_OUTPUT_DIR, exist_ok=True)
 
-    print(f"Saving tuned model to {os.path.join(MODEL_OUTPUT_DIR, MODEL_NAME_TUNED)}...")
     model_payload = {
         'model': final_model, 
         'features': feature_columns,
         'best_hyperparameters': study.best_params,
         'optuna_best_cv_rmse': study.best_value,
-        'monotonic_constraints': final_monotone_constraints_dict,
-        'optuna_study_summary': study.trials_dataframe().to_dict()
+        'split_type': 'stratified',
+        'train_indices': train_indices.tolist(),
+        'test_indices': test_indices.tolist()
     }
     joblib.dump(model_payload, os.path.join(MODEL_OUTPUT_DIR, MODEL_NAME_TUNED))
-    print("Tuned model saved successfully.")
-
-    # Generate plots
-    print("Generating plots...")
+    
+    # Generate comparison plots
     plt.figure(figsize=(15, 7))
-    plt.plot(y_test.index, y_test, label='Actual Apparent Temperature', alpha=0.8)
-    plt.plot(y_test.index, y_pred, label='Predicted Apparent Temperature', linestyle='--', alpha=0.8)
-    plt.title('Demand Prediction V2 (Monotonic): Actual vs. Predicted Apparent Temperature (Test Set)')
-    plt.xlabel('Time')
+    plt.plot(y_test.values, label='Actual', alpha=0.8)  # Remove time index since it's not sequential
+    plt.plot(y_pred, label='Predicted', linestyle='--', alpha=0.8)
+    plt.title('Stratified Split: Actual vs. Predicted Apparent Temperature')
+    plt.xlabel('Sample Index (Random Order)')
     plt.ylabel('Apparent Temperature (°C)')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plot_path_actual_vs_pred = os.path.join(FIGURES_OUTPUT_DIR, 'demand_actual_vs_predicted_test_v2_monotonic.png')
-    plt.savefig(plot_path_actual_vs_pred)
-    print(f"Actual vs. Predicted plot saved to {plot_path_actual_vs_pred}")
+    plt.savefig(os.path.join(FIGURES_OUTPUT_DIR, 'demand_stratified_actual_vs_pred.png'))
     plt.close()
 
-    # Feature Importance Plot
-    if hasattr(final_model, 'feature_importances_'):
-        plt.figure(figsize=(12, max(6, len(feature_columns) // 2)))
-        sorted_idx = final_model.feature_importances_.argsort()
-        plt.barh(np.array(feature_columns)[sorted_idx], final_model.feature_importances_[sorted_idx])
-        plt.xlabel("XGBoost Feature Importance")
-        plt.title("Demand Predictor V2 (Monotonic) Feature Importance")
-        plt.tight_layout()
-        plot_path_feat_imp = os.path.join(FIGURES_OUTPUT_DIR, 'demand_tuned_feature_importance_v2_monotonic.png')
-        plt.savefig(plot_path_feat_imp)
-        print(f"Feature importance plot saved to {plot_path_feat_imp}")
-        plt.close()
-        
-    print("Tuned demand predictor V2 (monotonic) training script finished.")
+    print("Stratified split model training completed!")
 
 if __name__ == '__main__':
     train_demand_model() 
