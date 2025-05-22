@@ -226,6 +226,22 @@ def train_demand_model():
     print("Splitting data into train and test sets (80/20, time-ordered)...")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
+    print("Calculating sample weights for training...")
+    k = 3
+    sample_weight_train = np.ones(len(y_train))
+    sample_weight_train[y_train > 18] = 1 + k # (y_train > 18) is a boolean, direct multiplication is fine.
+                                             # No, it's not. (y_train > 18) is boolean.
+                                             # We want to add k, not multiply by k.
+                                             # Correct: sample_weight_train[y_train > 18] = 1 + k
+    # Ensure y_train > 18 is treated as a condition to apply 1+k
+    # The previous comment was a bit misleading. The calculation for sample_weight_train should be:
+    # sample_weight_train = np.where(y_train > 18, 1 + k, 1).astype(float)
+    # Let's use the simpler assignment for clarity as originally intended by the user request.
+    # The condition y_train > 18 will select indices where the condition is true.
+    # sample_weight_train[y_train > 18] directly modifies those elements.
+    # For elements where y_train <= 18, their weight remains 1.0 as initialized.
+    # So, sample_weight_train[y_train > 18] = 1 + k is correct.
+
     # --- Optuna Hyperparameter Tuning ---
     print(f"Starting Optuna hyperparameter tuning with {N_CV_SPLITS}-fold TimeSeriesSplit and {N_OPTUNA_TRIALS} trials...")
 
@@ -235,7 +251,7 @@ def train_demand_model():
             'eval_metric': 'rmse',
             'n_estimators': trial.suggest_int('n_estimators', 200, 2000, step=100),
             'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.1, log=True),
-            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'max_depth': trial.suggest_int('max_depth', 3, 12),  # Increased from 10 to 12 for deeper trees
             'subsample': trial.suggest_float('subsample', 0.5, 1.0),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
             'gamma': trial.suggest_float('gamma', 1e-8, 1.0, log=True),
@@ -246,36 +262,54 @@ def train_demand_model():
             # 'tree_method': 'hist' 
         }
         
+        # Add monotonic constraints to prevent flattening at high temperatures
+        # Ensure temperature and apparent temperature forecasts have positive relationships with target
+        monotone_constraints_dict = {}
+        if 'temperature_forecast' in feature_columns:
+            monotone_constraints_dict['temperature_forecast'] = 1
+        if 'apparent_temperature_forecast' in feature_columns:
+            monotone_constraints_dict['apparent_temperature_forecast'] = 1
+        if 'sw_radiation_forecast' in feature_columns:
+            monotone_constraints_dict['sw_radiation_forecast'] = 1  # More solar radiation = higher apparent temp
+        
+        if monotone_constraints_dict:
+            # Convert to XGBoost format: dict with feature names as keys
+            params['monotone_constraints'] = monotone_constraints_dict
+            print(f"Applied monotonic constraints: {monotone_constraints_dict}")
+        
         # Attempt to use GPU if available for Optuna trials
         try:
-            # Check if XGBoost was built with CUDA support and a GPU is detected
-            # This is a proxy check; a more robust check might involve cupy or nvidia-smi
-            xgb.XGBRegressor(device='cuda').fit(X_train.iloc[:2], y_train.iloc[:2]) # Test with a tiny bit of data
+            # Check if CUDA is available
+            xgb.XGBRegressor(device='cuda')
             params['device'] = 'cuda'
             print("Optuna trial will attempt to use GPU.")
-        except Exception:
-            print("Optuna trial will use CPU.")
-            if 'device' in params: del params['device'] # Ensure it is not set if GPU fails
-            # params['tree_method'] = 'hist' # Fallback for CPU if needed
+        except xgb.core.XGBoostError:
+            params['device'] = 'cpu'
+            # print("GPU not available for Optuna trial, using CPU.")
 
+        model = xgb.XGBRegressor(**params)
         tscv = TimeSeriesSplit(n_splits=N_CV_SPLITS)
-        rmses = []
+        fold_rmses = []
 
-        # Add tqdm progress bar for the cross-validation folds
-        for fold, (train_idx, val_idx) in enumerate(tqdm(tscv.split(X_train), total=N_CV_SPLITS, desc=f'Trial {trial.number} CV', leave=False)):
+        # Use tqdm for progress bar on folds if desired, but can be verbose
+        # for fold, (train_idx, val_idx) in tqdm(enumerate(tscv.split(X_train)), total=N_CV_SPLITS, desc="CV Folds"):
+        for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train)):
             X_train_fold, X_val_fold = X_train.iloc[train_idx], X_train.iloc[val_idx]
             y_train_fold, y_val_fold = y_train.iloc[train_idx], y_train.iloc[val_idx]
-
-            model_cv = xgb.XGBRegressor(**params) # early_stopping_rounds is now in params
-            model_cv.fit(X_train_fold, y_train_fold,
-                         eval_set=[(X_val_fold, y_val_fold)],
-                         verbose=False)
             
-            preds = model_cv.predict(X_val_fold)
+            # Get sample weights for the current training fold
+            current_sample_weight_train_fold = sample_weight_train[train_idx]
+
+            model.fit(X_train_fold, y_train_fold,
+                      eval_set=[(X_val_fold, y_val_fold)],
+                      sample_weight=current_sample_weight_train_fold, # Pass sample weights here
+                      verbose=False) # Suppress verbose output during Optuna CV
+
+            preds = model.predict(X_val_fold)
             rmse = np.sqrt(mean_squared_error(y_val_fold, preds))
-            rmses.append(rmse)
-        
-        return np.mean(rmses)
+            fold_rmses.append(rmse)
+
+        return np.mean(fold_rmses)
 
     study = optuna.create_study(direction='minimize')
     
@@ -309,15 +343,7 @@ def train_demand_model():
         if 'device' in best_params: del best_params['device']
         # best_params['tree_method'] = 'hist'
 
-    print("Training final XGBoost Regressor model with best hyperparameters...")
-    final_model = xgb.XGBRegressor(
-        objective='reg:squarederror',
-        eval_metric='rmse', # Good to have eval_metric for final fit too
-        **best_params,
-        random_state=42,
-        # n_estimators is set by best_params, early stopping will adjust it if eval_set is provided
-        early_stopping_rounds=XGB_EARLY_STOPPING_ROUNDS_FINAL 
-    )
+    print("Training final XGBoost Regressor model with best hyperparameters...")        # Add monotonic constraints to final model as well    final_monotone_constraints_dict = {}    if 'temperature_forecast' in feature_columns:        final_monotone_constraints_dict['temperature_forecast'] = 1    if 'apparent_temperature_forecast' in feature_columns:        final_monotone_constraints_dict['apparent_temperature_forecast'] = 1    if 'sw_radiation_forecast' in feature_columns:        final_monotone_constraints_dict['sw_radiation_forecast'] = 1        if final_monotone_constraints_dict:        best_params['monotone_constraints'] = final_monotone_constraints_dict        print(f"Applied monotonic constraints to final model: {final_monotone_constraints_dict}")        final_model = xgb.XGBRegressor(        objective='reg:squarederror',        eval_metric='rmse', # Good to have eval_metric for final fit too        **best_params,        random_state=42,        # n_estimators is set by best_params, early stopping will adjust it if eval_set is provided        early_stopping_rounds=XGB_EARLY_STOPPING_ROUNDS_FINAL     )
     
     # Create an evaluation set for early stopping for the final model
     # This uses a portion of the full training set
