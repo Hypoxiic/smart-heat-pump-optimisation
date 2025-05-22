@@ -262,9 +262,7 @@ def plot_optuna_diagnostics(study, save_dir):
         return
     try:
         if optuna.visualization.is_available():
-            fig_history = optuna.visualization.plot_optimization_history(study)
-            fig_history.write_image(os.path.join(save_dir, "optuna_optimization_history.png"))
-            print(f"Optuna optimization history plot saved to {save_dir}")
+                        fig_history = optuna.visualization.plot_optimization_history(study)            fig_history.write_image(os.path.join(save_dir, "optuna_optimisation_history.png"))            print(f"Optuna optimisation history plot saved to {save_dir}")
 
             fig_param_importance = optuna.visualization.plot_param_importances(study)
             fig_param_importance.write_image(os.path.join(save_dir, "optuna_param_importances.png"))
@@ -330,7 +328,7 @@ def main():
 
     tscv = TimeSeriesSplit(n_splits=N_CV_SPLITS)
 
-    print(f"\nStarting Optuna hyperparameter optimization ({OPTUNA_N_TRIALS} trials)...")
+    print(f"\nStarting Optuna hyperparameter optimisation ({OPTUNA_N_TRIALS} trials)...")
     study = None
     try:
         study = optuna.create_study(direction='minimize', study_name='xgb_price_prediction')

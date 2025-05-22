@@ -243,7 +243,7 @@ def train_heating_demand_model():
 
         return np.mean(fold_rmses)
 
-    print(f"Starting Optuna optimization with {N_OPTUNA_TRIALS} trials...")
+    print(f"Starting Optuna optimisation with {N_OPTUNA_TRIALS} trials...")
     study = optuna.create_study(direction='minimize')
     
     for _ in tqdm(range(N_OPTUNA_TRIALS), desc="Optuna Trials"):

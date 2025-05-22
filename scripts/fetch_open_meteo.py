@@ -60,8 +60,8 @@ def fetch_historical_forecast_data(
             "end_date": current_end_date_chunk_str,
             "hourly": variables,
             "timezone": "UTC",
-            # forecast_hours=1 can be added if needed, but API behavior for historical range needs checking.
-            # Default behavior might already provide the T+1 from each run for the specified hourly variables.
+            # forecast_hours=1 can be added if needed, but API behaviour for historical range needs checking.
+# Default behaviour might already provide the T+1 from each run for the specified hourly variables.
         }
 
         try:

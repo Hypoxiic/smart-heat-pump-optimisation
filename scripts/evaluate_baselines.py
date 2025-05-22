@@ -123,7 +123,7 @@ def baseline_temperature_driven(df, temp_threshold_c, temperature_col='apparent_
     df_schedule = df.copy()
     if temperature_col not in df_schedule.columns:
         print(f"Warning: '{temperature_col}' not in DataFrame for temperature_driven rule.")
-        df_schedule['run_heat_pump'] = False # Or some default behavior, like always run if temp unavailable
+        df_schedule['run_heat_pump'] = False # Or some default behaviour, like always run if temp unavailable
         return df_schedule
     df_schedule['run_heat_pump'] = df_schedule[temperature_col] < temp_threshold_c
     # Handle NaN temperatures: if temperature is NaN, rule condition is False, so don't run.
@@ -198,7 +198,7 @@ def main(input_file_path):
     all_baseline_results[rule_name_temp] = metrics_temp_driven
     print(f"Results: {metrics_temp_driven}")
 
-    # --- Summarize All Results ---
+    # --- Summarise All Results ---
     print("\n\n--- All Baseline Results Summary ---")
     results_df = pd.DataFrame.from_dict(all_baseline_results, orient='index')
     # Add a column for efficiency or rank if desired later

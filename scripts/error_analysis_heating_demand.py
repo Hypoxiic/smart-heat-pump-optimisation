@@ -30,7 +30,7 @@ def load_and_prepare_data():
     
     return df
 
-def analyze_heating_demand_errors():
+def analyse_heating_demand_errors():
     """Comprehensive error analysis for heating demand prediction model."""
     print("🔥 HEATING DEMAND MODEL ERROR ANALYSIS")
     print("=" * 60)
@@ -301,4 +301,4 @@ def analyze_heating_demand_errors():
         print(f"  • Zero-demand prediction accuracy: {zero_accuracy:.1f}% ({correct_zero_predictions}/{total_zero_actual})")
 
 if __name__ == '__main__':
-    analyze_heating_demand_errors() 
+    analyse_heating_demand_errors() 

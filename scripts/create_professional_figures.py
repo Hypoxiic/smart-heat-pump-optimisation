@@ -18,7 +18,7 @@ MODEL_PATH = "models/heating_demand_predictor_xgb_tuned.joblib"
 DATA_PATH = "data/processed/final_dataset_with_forecasts.csv"
 FIGURES_OUTPUT_DIR = "reports/figures"
 
-# Professional color scheme
+# Professional colour scheme
 COLORS = {
     'primary': '#2E86AB',
     'secondary': '#A23B72', 

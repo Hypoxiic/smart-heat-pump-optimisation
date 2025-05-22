@@ -109,7 +109,7 @@ target = heating_demand.shift(-1)
 ### **Why This Fixed Everything**
 - ✅ **Eliminates extrapolation:** Model interpolates within 0-27 degree-hours range
 - ✅ **Correct physics:** Summer → 0 heating demand, Winter → positive heating demand
-- ✅ **Optimization-ready:** Direct input for heat pump controller
+- ✅ **Optimisation-ready:** Direct input for heat pump controller
 - ✅ **26-36% better performance:** Immediate improvement across all metrics
 
 ### **Key Learning**
@@ -120,9 +120,9 @@ This pivot from temperature proxy to direct heating demand represents the **most
 ## 🧩 Development Stages
 
 ### 1. 🏁 Initial Setup ✅
-- ✅ Project structure with organized directories
+- ✅ Project structure with organised directories
 - ✅ Comprehensive `README.md` with continuous updates
-- ✅ Professional visualization pipeline
+- ✅ Professional visualisation pipeline
 
 ### 2. 📥 Data Acquisition ✅
 - ✅ **Open-Meteo:** Historical hourly weather data
@@ -134,7 +134,7 @@ This pivot from temperature proxy to direct heating demand represents the **most
 ### 3. 📊 Exploratory Data Analysis ✅
 - ✅ Comprehensive EDA in Jupyter Notebooks
 - ✅ Temporal patterns analysis across all variables
-- ✅ Professional visualizations and correlation analysis
+- ✅ Professional visualisations and correlation analysis
 
 ### 4. 🤖 Model Development ✅
 - ✅ **Heating Demand Prediction:** XGBoost with Optuna tuning
@@ -145,10 +145,10 @@ This pivot from temperature proxy to direct heating demand represents the **most
 ### 5. 🔁 Simulation and Testing ✅
 - ✅ Comprehensive error analysis and validation
 - ✅ Seasonal and temporal performance evaluation
-- ✅ Professional model documentation and visualization
+- ✅ Professional model documentation and visualisation
 
 ### 6. 🚀 Deployment Prep (In Progress)
-- 🔄 Heat pump optimization engine development
+- 🔄 Heat pump optimisation engine development
 - 🔄 Real-time prediction pipeline
 - 🔄 Production deployment configuration
 
@@ -238,7 +238,7 @@ python scripts/preprocess_data.py
 python models/train_heating_demand_predictor.py
 python models/train_price_predictor.py
 
-# 4. Generate visualizations
+# 4. Generate visualisations
 python scripts/create_professional_figures.py
 
 # 5. Run error analysis
@@ -246,22 +246,22 @@ python scripts/error_analysis_heating_demand.py
 ```
 
 ### Professional Figures Generation
-All model performance visualizations are automatically generated in publication-quality format with:
+All model performance visualisations are automatically generated in publication-quality format with:
 - High-resolution (300 DPI) output
-- Professional styling and color schemes
+- Professional styling and colour schemes
 - Comprehensive error analysis and feature importance
 - Temporal performance patterns
 
-## Next Steps: Heat Pump Optimization
+## Next Steps: Heat Pump Optimisation
 
 ### 🎯 **Ready for Integration**
 1. **Heating Demand Model:** Production-ready for heat pump controllers
-2. **Price Prediction:** Cost optimization for scheduling decisions
-3. **Uncertainty Quantification:** Add prediction intervals for robust optimization
+2. **Price Prediction:** Cost optimisation for scheduling decisions
+3. **Uncertainty Quantification:** Add prediction intervals for robust optimisation
 4. **Multi-horizon Forecasting:** Extend to 6h, 24h predictions for planning
 
-### 🚀 **Optimization Engine Development**
-- **Objective:** Minimize energy costs and carbon emissions
+### 🚀 **Optimisation Engine Development**
+- **Objective:** Minimise energy costs and carbon emissions
 - **Approach:** Reinforcement learning or mixed-integer programming
 - **Integration:** Real-time weather forecasts + demand predictions
 - **Target:** Production deployment for residential heat pumps
@@ -269,23 +269,23 @@ All model performance visualizations are automatically generated in publication-
 ## Key Achievements
 
 ✅ **Data Pipeline:** Robust multi-source data collection and preprocessing  
-✅ **Model Performance:** 26-36% improvement through target variable optimization  
+✅ **Model Performance:** 26-36% improvement through target variable optimisation  
 ✅ **Physics Integration:** Physically meaningful heating demand predictions  
-✅ **Professional Documentation:** Comprehensive analysis and visualization  
-✅ **Production Ready:** Deployment-ready heat pump optimization models  
+✅ **Professional Documentation:** Comprehensive analysis and visualisation  
+✅ **Production Ready:** Deployment-ready heat pump optimisation models  
 
 ## Limitations and Future Work
 
 ### Current Limitations
-- **Single Location:** Currently optimized for London weather patterns
+- **Single Location:** Currently optimised for London weather patterns
 - **Seasonal Coverage:** Model trained on 2022-2024 data patterns
 - **Heat Pump Specificity:** Designed for air-to-water heat pump systems
 
 ### Future Enhancements
 1. **Multi-Location Adaptation:** Extend to other UK regions and climates
 2. **Real-Time Integration:** Live weather and tariff API connections
-3. **Heat Pump Controller:** Direct hardware integration for automated optimization
-4. **Multi-Objective Optimization:** Balance cost, comfort, and carbon emissions
+3. **Heat Pump Controller:** Direct hardware integration for automated optimisation
+4. **Multi-Objective Optimisation:** Balance cost, comfort, and carbon emissions
 5. **Uncertainty Quantification:** Prediction intervals for robust decision making
 
 ## Licensing
@@ -293,4 +293,4 @@ This project is developed for educational and research purposes. Please refer to
 
 ---
 
-*This project demonstrates the critical importance of proper target variable selection in machine learning applications. The breakthrough from temperature prediction to direct heating demand prediction represents a fundamental insight for smart building optimization systems.* 
+*This project demonstrates the critical importance of proper target variable selection in machine learning applications. The breakthrough from temperature prediction to direct heating demand prediction represents a fundamental insight for smart building optimisation systems.* 

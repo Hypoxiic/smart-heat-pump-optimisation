@@ -72,7 +72,7 @@ def main():
         print("'is_price_imputed' column not found, adding and initializing to False.")
         df['is_price_imputed'] = False
     else:
-        # Ensure it's boolean and reset if necessary for a clean run (optional, depends on desired behavior)
+        # Ensure it's boolean and reset if necessary for a clean run (optional, depends on desired behaviour)
         # For this script, we assume it was correctly initialized to False in featured_dataset_phase2
         pass 
 

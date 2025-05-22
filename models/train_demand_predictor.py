@@ -253,7 +253,7 @@ def train_demand_model():
 
     study = optuna.create_study(direction='minimize')
     
-    print(f"Starting Optuna optimization with {N_OPTUNA_TRIALS} trials...")
+    print(f"Starting Optuna optimisation with {N_OPTUNA_TRIALS} trials...")
     for _ in tqdm(range(N_OPTUNA_TRIALS), desc="Optuna Trials"):
         study.optimize(objective, n_trials=1, timeout=1800)
 

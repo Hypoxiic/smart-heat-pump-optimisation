@@ -1,6 +1,6 @@
 import joblib
 import matplotlib.pyplot as plt
-import xgboost as xgb # Import xgboost to ensure its classes are recognized by joblib
+import xgboost as xgb # Import xgboost to ensure its classes are recognised by joblib
 import os # Added import os
 
 def plot_loss_curve(model_path, output_path="loss_curve.png"):
@@ -56,7 +56,7 @@ def plot_loss_curve(model_path, output_path="loss_curve.png"):
                 model = loaded_object
                 print(f"Loaded object is assumed to be the model itself, type: {type(model)}")
             else:
-                print(f"Loaded object is of type {type(loaded_object)}, which is not a recognized model type or a dictionary containing one.")
+                print(f"Loaded object is of type {type(loaded_object)}, which is not a recognised model type or a dictionary containing one.")
                 return
 
         # Now, try to get results from the model if not already found in the dict
